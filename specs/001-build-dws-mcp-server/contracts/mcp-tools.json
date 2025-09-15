@@ -1,0 +1,280 @@
+{
+  "name": "postgresql-mcp",
+  "version": "1.0.0",
+  "description": "PostgreSQL database operations via MCP protocol",
+  "tools": [
+    {
+      "name": "get_metadata",
+      "description": "Retrieve database schema information including tables, columns, and data types",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "table": {
+            "type": "string",
+            "description": "Optional table name to get specific table metadata",
+            "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+          },
+          "refresh": {
+            "type": "boolean",
+            "description": "Force refresh of cached metadata",
+            "default": false
+          }
+        },
+        "required": []
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "tables": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "columns": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "data_type": {
+                        "type": "string"
+                      },
+                      "nullable": {
+                        "type": "boolean"
+                      },
+                      "is_primary": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": ["name", "data_type", "nullable"]
+                  }
+                },
+                "row_count": {
+                  "type": "integer"
+                }
+              },
+              "required": ["name", "columns"]
+            }
+          },
+          "cache_age": {
+            "type": "integer",
+            "description": "Age of cached data in seconds"
+          }
+        },
+        "required": ["tables"]
+      }
+    },
+    {
+      "name": "select_data",
+      "description": "Select data from a table with optional column selection and row limits",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "table": {
+            "type": "string",
+            "description": "Table name to query",
+            "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+          },
+          "columns": {
+            "type": "array",
+            "description": "Columns to select (default: all)",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$|^\\*$"
+            },
+            "default": ["*"],
+            "maxItems": 50
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum rows to return",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 5
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Number of rows to skip",
+            "minimum": 0,
+            "default": 0
+          }
+        },
+        "required": ["table"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "columns": {
+            "type": "array",
+            "description": "Column names in result",
+            "items": {
+              "type": "string"
+            }
+          },
+          "rows": {
+            "type": "array",
+            "description": "Data rows",
+            "items": {
+              "type": "array"
+            }
+          },
+          "row_count": {
+            "type": "integer",
+            "description": "Number of rows returned"
+          },
+          "has_more": {
+            "type": "boolean",
+            "description": "More rows available"
+          }
+        },
+        "required": ["columns", "rows", "row_count"]
+      }
+    },
+    {
+      "name": "execute_filter",
+      "description": "Execute a filtered query with safe SQL operations",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "table": {
+            "type": "string",
+            "description": "Table name to query",
+            "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+          },
+          "columns": {
+            "type": "array",
+            "description": "Columns to select",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$|^\\*$"
+            },
+            "default": ["*"]
+          },
+          "filters": {
+            "type": "array",
+            "description": "Filter conditions (max 3)",
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "properties": {
+                "column": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+                },
+                "operator": {
+                  "type": "string",
+                  "enum": ["=", "!=", ">", "<", ">=", "<=", "LIKE", "IN", "IS NULL", "IS NOT NULL"]
+                },
+                "value": {
+                  "description": "Value to compare (type varies by operator)"
+                },
+                "logical": {
+                  "type": "string",
+                  "enum": ["AND", "OR"],
+                  "description": "Logical operator to next condition"
+                }
+              },
+              "required": ["column", "operator"]
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 5
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0
+          }
+        },
+        "required": ["table", "filters"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "columns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "array"
+            }
+          },
+          "row_count": {
+            "type": "integer"
+          },
+          "query_time_ms": {
+            "type": "integer",
+            "description": "Query execution time in milliseconds"
+          },
+          "has_more": {
+            "type": "boolean"
+          }
+        },
+        "required": ["columns", "rows", "row_count"]
+      }
+    }
+  ],
+  "errors": {
+    "CONNECTION_POOL_EXHAUSTED": {
+      "code": "CONNECTION_POOL_EXHAUSTED",
+      "message": "All database connections are currently in use",
+      "retryable": true,
+      "retry_after": 5
+    },
+    "RATE_LIMIT_EXCEEDED": {
+      "code": "RATE_LIMIT_EXCEEDED",
+      "message": "Request rate limit exceeded (10 requests per minute)",
+      "retryable": true,
+      "retry_after": 60
+    },
+    "QUERY_TIMEOUT": {
+      "code": "QUERY_TIMEOUT",
+      "message": "Query exceeded 30-second timeout",
+      "retryable": true,
+      "retry_after": 10
+    },
+    "INVALID_TABLE_NAME": {
+      "code": "INVALID_TABLE_NAME",
+      "message": "Table name does not exist or is invalid",
+      "retryable": false
+    },
+    "INVALID_COLUMN_NAME": {
+      "code": "INVALID_COLUMN_NAME",
+      "message": "Column name does not exist in table",
+      "retryable": false
+    },
+    "MALFORMED_FILTER": {
+      "code": "MALFORMED_FILTER",
+      "message": "Filter syntax is invalid",
+      "retryable": false
+    },
+    "AUTHENTICATION_FAILED": {
+      "code": "AUTHENTICATION_FAILED",
+      "message": "Database authentication failed",
+      "retryable": false
+    },
+    "PERMISSION_DENIED": {
+      "code": "PERMISSION_DENIED",
+      "message": "Insufficient permissions for requested operation",
+      "retryable": false
+    },
+    "DATABASE_UNAVAILABLE": {
+      "code": "DATABASE_UNAVAILABLE",
+      "message": "Database is temporarily unavailable",
+      "retryable": true,
+      "retry_after": 30
+    }
+  }
+}
