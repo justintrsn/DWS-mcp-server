@@ -718,6 +718,161 @@ class TestMCPClient:
         except Exception as e:
             return f"Error: {str(e)}"
 
+    async def test_schemas_list(self):
+        """Test the schemas_list tool"""
+        print("\n" + "="*60)
+        print(" TEST: schemas_list tool")
+        print("="*60)
+
+        try:
+            # Test without system schemas
+            result = await self.session.call_tool("schemas_list", {
+                "include_system": False,
+                "include_sizes": False
+            })
+
+            # Parse result
+            data = self.parse_result(result)
+
+            if 'error' in data:
+                print(f"⚠️  Error: {data['error']}")
+                return False
+
+            print(f"✅ Found {data.get('count', 0)} user schemas in database {data.get('database', 'unknown')}")
+
+            # Show first 3 schemas
+            schemas = data.get('schemas', [])
+            for schema in schemas[:3]:
+                print(f"\n   Schema: {schema.get('schema_name', 'unknown')}")
+                print(f"   - Owner: {schema.get('schema_owner', 'N/A')}")
+                print(f"   - Type: {schema.get('schema_type', 'N/A')}")
+                print(f"   - Tables: {schema.get('table_count', 0)}")
+
+            # Test with system schemas and sizes
+            print("\n📊 Testing with system schemas and sizes...")
+            result = await self.session.call_tool("schemas_list", {
+                "include_system": True,
+                "include_sizes": True
+            })
+
+            data = self.parse_result(result)
+            if 'error' not in data:
+                total_schemas = data.get('count', 0)
+                print(f"✅ Found {total_schemas} total schemas (including system)")
+
+                # Show first schema with size
+                schemas = data.get('schemas', [])
+                if schemas:
+                    schema = schemas[0]
+                    if 'size_pretty' in schema:
+                        print(f"   {schema['schema_name']}: {schema['size_pretty']}")
+
+            return True
+
+        except Exception as e:
+            print(f"❌ Failed: {e}")
+            return False
+
+    async def test_database_stats(self):
+        """Test the database_stats tool"""
+        print("\n" + "="*60)
+        print(" TEST: database_stats tool")
+        print("="*60)
+
+        try:
+            result = await self.session.call_tool("database_stats", {})
+
+            # Parse result
+            data = self.parse_result(result)
+
+            if 'error' in data:
+                print(f"⚠️  Error: {data['error']}")
+                return False
+
+            print(f"✅ Database Statistics for {data.get('database_name', 'unknown')}:")
+            print(f"   - Size: {data.get('size_pretty', 'N/A')} ({data.get('size_bytes', 0)} bytes)")
+            print(f"   - Version: {data.get('version', 'N/A')}")
+            print(f"   - Uptime: {data.get('uptime', 'N/A')}")
+            print(f"   - Connections: {data.get('current_connections', 0)}/{data.get('max_connections', 0)}")
+
+            # Show statistics if available
+            stats = data.get('statistics', {})
+            if stats:
+                print(f"\n   Performance Metrics:")
+                print(f"   - Transactions Committed: {stats.get('transactions_committed', 0):,}")
+                print(f"   - Transactions Rolled Back: {stats.get('transactions_rolled_back', 0):,}")
+                print(f"   - Cache Hit Ratio: {stats.get('cache_hit_ratio', 0):.2f}%")
+                print(f"   - Deadlocks: {stats.get('deadlocks', 0)}")
+                print(f"   - Temp Files: {stats.get('temp_files', 0)}")
+
+            return True
+
+        except Exception as e:
+            print(f"❌ Failed: {e}")
+            return False
+
+    async def test_connection_info(self):
+        """Test the connection_info tool"""
+        print("\n" + "="*60)
+        print(" TEST: connection_info tool")
+        print("="*60)
+
+        try:
+            # Test with state grouping
+            result = await self.session.call_tool("connection_info", {
+                "by_state": True,
+                "by_database": False
+            })
+
+            # Parse result
+            data = self.parse_result(result)
+
+            if 'error' in data:
+                print(f"⚠️  Error: {data['error']}")
+                return False
+
+            print(f"✅ Connection Information:")
+            print(f"   - Current: {data.get('current_connections', 0)}/{data.get('max_connections', 0)}")
+            print(f"   - Usage: {data.get('connection_usage_percent', 0):.1f}%")
+            print(f"   - Active Queries: {data.get('active_queries', 0)}")
+            print(f"   - Idle: {data.get('idle_connections', 0)}")
+
+            # Show connections by state
+            by_state = data.get('connections_by_state', {})
+            if by_state:
+                print(f"\n   By State:")
+                for state, count in by_state.items():
+                    if count > 0:
+                        print(f"   - {state}: {count}")
+
+            # Show warnings if any
+            warnings = data.get('warnings', [])
+            if warnings:
+                print(f"\n   ⚠️  Warnings:")
+                for warning in warnings:
+                    print(f"   - {warning}")
+
+            # Test with database grouping
+            print("\n📊 Testing with database grouping...")
+            result = await self.session.call_tool("connection_info", {
+                "by_state": False,
+                "by_database": True
+            })
+
+            data = self.parse_result(result)
+            if 'error' not in data:
+                by_db = data.get('connections_by_database', [])
+                if by_db:
+                    print(f"   Connections by Database:")
+                    for db_info in by_db[:3]:  # Show first 3 databases
+                        print(f"   - {db_info.get('database', 'unknown')}: {db_info.get('count', 0)}")
+
+            return True
+
+        except Exception as e:
+            print(f"❌ Failed: {e}")
+            return False
+
     async def run_all_tests(self):
         """Run all tests"""
         print("\n" + "="*60)
@@ -759,6 +914,24 @@ class TestMCPClient:
 
         # Test 6: OpenAI integration (if API key available)
         if await self.test_openai_integration():
+            tests_passed += 1
+        else:
+            tests_failed += 1
+
+        # Test 7: Schemas list (NEW)
+        if await self.test_schemas_list():
+            tests_passed += 1
+        else:
+            tests_failed += 1
+
+        # Test 8: Database stats (NEW)
+        if await self.test_database_stats():
+            tests_passed += 1
+        else:
+            tests_failed += 1
+
+        # Test 9: Connection info (NEW)
+        if await self.test_connection_info():
             tests_passed += 1
         else:
             tests_failed += 1

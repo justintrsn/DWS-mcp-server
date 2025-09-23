@@ -15,7 +15,10 @@ from models.config import DatabaseConfig
 from models.error_types import MCPError, InvalidTableError
 from services.database_service import DatabaseService
 from services.health_api import HealthAPI
-from lib.mcp_tools import get_tables, get_columns, get_table_stats
+from lib.mcp_tools import (
+    get_tables, get_columns, get_table_stats,
+    list_schemas, get_database_stats, get_connection_info
+)
 from transport.stdio_server import StdioTransport
 
 # Initialize logging
@@ -122,7 +125,7 @@ async def describe_table(table_name: str, schema: Optional[str] = None) -> Dict[
 
 
 @mcp.tool()
-async def table_statistics(table_name: Optional[str] = None, 
+async def table_statistics(table_name: Optional[str] = None,
                           table_names: Optional[list] = None) -> Dict[str, Any]:
     """Get statistics for one or more tables.
     
@@ -158,6 +161,106 @@ async def table_statistics(table_name: Optional[str] = None,
         }
     except Exception as e:
         logger.error(f"Unexpected error in table_statistics: {e}")
+        return {
+            'error': f"Unexpected error: {str(e)}",
+            'recoverable': False
+        }
+
+
+# ============================================================================
+# Database-Level Tools (T011-T013)
+# ============================================================================
+
+@mcp.tool()
+async def schemas_list(include_system: bool = False,
+                       include_sizes: bool = False) -> Dict[str, Any]:
+    """List all database schemas with ownership and classification.
+
+    Args:
+        include_system: Include system schemas (pg_*, information_schema)
+        include_sizes: Include schema sizes (slower query)
+
+    Returns:
+        Dictionary containing:
+        - schemas: List of schema information
+        - count: Number of schemas
+        - database: Database name
+    """
+    try:
+        if not db_service:
+            initialize_database()
+        return list_schemas(db_service, include_system, include_sizes)
+    except MCPError as e:
+        logger.error(f"MCP error in schemas_list: {e}")
+        return {
+            'error': str(e),
+            'recoverable': e.recoverable
+        }
+    except Exception as e:
+        logger.error(f"Unexpected error in schemas_list: {e}")
+        return {
+            'error': f"Unexpected error: {str(e)}",
+            'recoverable': False
+        }
+
+
+@mcp.tool()
+async def database_stats() -> Dict[str, Any]:
+    """Get comprehensive database statistics and metrics.
+
+    Returns:
+        Dictionary containing database statistics including:
+        - Database name, size, connections
+        - Transaction statistics
+        - Cache hit ratio
+        - Temporary files usage
+    """
+    try:
+        if not db_service:
+            initialize_database()
+        return get_database_stats(db_service)
+    except MCPError as e:
+        logger.error(f"MCP error in database_stats: {e}")
+        return {
+            'error': str(e),
+            'recoverable': e.recoverable
+        }
+    except Exception as e:
+        logger.error(f"Unexpected error in database_stats: {e}")
+        return {
+            'error': f"Unexpected error: {str(e)}",
+            'recoverable': False
+        }
+
+
+@mcp.tool()
+async def connection_info(by_state: bool = True,
+                         by_database: bool = False) -> Dict[str, Any]:
+    """Get current database connection information and statistics.
+
+    Args:
+        by_state: Group connections by state
+        by_database: Group connections by database
+
+    Returns:
+        Dictionary containing connection information including:
+        - Current and max connections
+        - Connection states breakdown
+        - Per-database connection counts (if requested)
+        - Connection saturation warnings
+    """
+    try:
+        if not db_service:
+            initialize_database()
+        return get_connection_info(db_service, by_state, by_database)
+    except MCPError as e:
+        logger.error(f"MCP error in connection_info: {e}")
+        return {
+            'error': str(e),
+            'recoverable': e.recoverable
+        }
+    except Exception as e:
+        logger.error(f"Unexpected error in connection_info: {e}")
         return {
             'error': f"Unexpected error: {str(e)}",
             'recoverable': False
