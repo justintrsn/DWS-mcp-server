@@ -5,8 +5,10 @@ PostgreSQL MCP (Model Context Protocol) server providing safe database operation
 
 ## Technology Stack
 - **Language**: Python 3.11+
-- **Framework**: FastMCP (MCP protocol implementation)
+- **Framework**: FastMCP (MCP protocol implementation), FastAPI
 - **Database**: PostgreSQL via psycopg2
+- **LLM Providers**: OpenAI (gpt-4o), Huawei MaaS (OpenAI-compatible)
+- **Async**: asyncio, httpx, aiohttp
 - **Testing**: pytest with Docker PostgreSQL
 - **Configuration**: python-dotenv for environment variables
 
@@ -27,14 +29,17 @@ PostgreSQL MCP (Model Context Protocol) server providing safe database operation
 ## Project Structure
 ```
 src/
-├── models/          # Data models (connection pool, rate limiter)
-├── services/        # Business logic (database service, query builder)
-├── cli/            # MCP server entry point
-└── lib/            # MCP tool implementations
+├── models/          # Data models (query, session, tool invocation)
+├── services/        # Business logic (LLM, MCP, middleware)
+├── cli/            # CLI tools for testing
+├── lib/            # Core libraries
+│   ├── transport/  # MCP transport abstractions (stdio, SSE)
+│   └── providers/  # LLM provider abstractions
+└── api/            # FastAPI endpoints
 
 tests/
-├── contract/       # MCP protocol contract tests
-├── integration/    # End-to-end tests with real database
+├── contract/       # API contract tests
+├── integration/    # E2E tests with real services
 └── unit/          # Component unit tests
 ```
 
@@ -59,7 +64,14 @@ pytest tests/integration/test_connection_pool.py
 
 ### Running
 ```bash
-python -m src.cli.mcp_server
+# MCP Server
+python -m src.cli.mcp_server --transport sse --port 3000
+
+# Middleware API
+python -m src.api.main
+
+# Test E2E
+python -m src.cli.middleware --test-e2e --query "List tables"
 ```
 
 ## Key Patterns
@@ -110,9 +122,10 @@ python -m src.cli.mcp_server
 - No DDL operations allowed
 
 ## Recent Changes
-- Initial implementation of MCP tools
-- Connection pool with queue management
-- Token bucket rate limiting
+- Added OpenAI-Compatible MCP Middleware (002)
+- LLM provider abstraction (OpenAI/Huawei MaaS)
+- Transport abstraction layer (stdio/SSE)
+- API endpoints for query processing
 
 ---
 *Generated for PostgreSQL MCP Server v1.0.0*

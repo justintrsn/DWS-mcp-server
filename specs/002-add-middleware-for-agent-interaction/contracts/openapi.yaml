@@ -1,0 +1,461 @@
+openapi: 3.0.3
+info:
+  title: MCP Middleware API
+  description: OpenAI-compatible middleware for MCP tool interaction
+  version: 1.0.0
+  contact:
+    name: API Support
+    email: support@example.com
+
+servers:
+  - url: http://localhost:8000
+    description: Development server
+  - url: https://api.mcp-middleware.com
+    description: Production server
+
+paths:
+  /api/query:
+    post:
+      summary: Process a natural language query
+      description: Submit a query to be processed by LLM with MCP tools
+      operationId: processQuery
+      tags:
+        - Query
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueryRequest'
+      responses:
+        '200':
+          description: Query processed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryResponse'
+          headers:
+            X-RateLimit-Limit:
+              schema:
+                type: integer
+              description: Rate limit maximum
+            X-RateLimit-Remaining:
+              schema:
+                type: integer
+              description: Remaining requests
+            X-RateLimit-Reset:
+              schema:
+                type: integer
+              description: Reset time (Unix timestamp)
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+      security:
+        - BearerAuth: []
+
+  /api/health:
+    get:
+      summary: Health check endpoint
+      description: Check system health and component status
+      operationId: getHealth
+      tags:
+        - System
+      responses:
+        '200':
+          description: System is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: System is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /api/tools:
+    get:
+      summary: List available MCP tools
+      description: Get all discovered MCP tools from connected servers
+      operationId: listTools
+      tags:
+        - Tools
+      parameters:
+        - name: transport
+          in: query
+          description: Filter by transport type
+          schema:
+            type: string
+            enum: [stdio, sse]
+      responses:
+        '200':
+          description: Tools retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolsResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+      security:
+        - BearerAuth: []
+
+  /api/session:
+    post:
+      summary: Create a new session
+      description: Initialize a new conversation session
+      operationId: createSession
+      tags:
+        - Session
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+      responses:
+        '201':
+          description: Session created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+      security:
+        - BearerAuth: []
+
+  /api/session/{session_id}:
+    get:
+      summary: Get session details
+      description: Retrieve session history and context
+      operationId: getSession
+      tags:
+        - Session
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Session retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      security:
+        - BearerAuth: []
+
+components:
+  schemas:
+    QueryRequest:
+      type: object
+      required:
+        - content
+      properties:
+        content:
+          type: string
+          description: Natural language query
+          minLength: 1
+          maxLength: 4000
+          example: "What tables are in the database?"
+        session_id:
+          type: string
+          format: uuid
+          description: Optional session for context
+        provider:
+          type: string
+          enum: [openai, huawei_maas]
+          description: Preferred LLM provider
+          default: openai
+        transport:
+          type: string
+          enum: [stdio, sse]
+          description: Preferred MCP transport
+        stream:
+          type: boolean
+          description: Stream the response
+          default: false
+
+    QueryResponse:
+      type: object
+      required:
+        - id
+        - content
+        - provider_used
+        - model
+        - timestamp
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Response identifier
+        query_id:
+          type: string
+          format: uuid
+          description: Original query identifier
+        content:
+          type: string
+          description: AI-generated response
+        tool_calls:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolInvocation'
+        provider_used:
+          type: string
+          enum: [openai, huawei_maas]
+        model:
+          type: string
+          example: "gpt-4o"
+        usage:
+          type: object
+          properties:
+            prompt_tokens:
+              type: integer
+            completion_tokens:
+              type: integer
+            total_tokens:
+              type: integer
+        timestamp:
+          type: string
+          format: date-time
+        duration_ms:
+          type: integer
+          description: Total processing time in milliseconds
+
+    ToolInvocation:
+      type: object
+      required:
+        - tool_name
+        - arguments
+      properties:
+        id:
+          type: string
+        tool_name:
+          type: string
+          example: "list_tables"
+        arguments:
+          type: object
+          additionalProperties: true
+        result:
+          type: object
+          additionalProperties: true
+        error:
+          type: string
+        duration_ms:
+          type: integer
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - timestamp
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        timestamp:
+          type: string
+          format: date-time
+        components:
+          type: object
+          properties:
+            mcp_stdio:
+              $ref: '#/components/schemas/ComponentHealth'
+            mcp_sse:
+              $ref: '#/components/schemas/ComponentHealth'
+            openai:
+              $ref: '#/components/schemas/ComponentHealth'
+            huawei_maas:
+              $ref: '#/components/schemas/ComponentHealth'
+            database:
+              $ref: '#/components/schemas/ComponentHealth'
+        uptime_seconds:
+          type: integer
+        version:
+          type: string
+
+    ComponentHealth:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy, unknown]
+        message:
+          type: string
+        last_check:
+          type: string
+          format: date-time
+
+    ToolsResponse:
+      type: object
+      required:
+        - tools
+        - count
+      properties:
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/MCPTool'
+        count:
+          type: integer
+        transport_types:
+          type: array
+          items:
+            type: string
+
+    MCPTool:
+      type: object
+      required:
+        - name
+        - description
+      properties:
+        name:
+          type: string
+          example: "list_tables"
+        description:
+          type: string
+          example: "List all tables in the database"
+        input_schema:
+          type: object
+          description: JSON Schema for tool arguments
+        transport:
+          type: string
+          enum: [stdio, sse]
+
+    CreateSessionRequest:
+      type: object
+      properties:
+        provider_preference:
+          type: string
+          enum: [openai, huawei_maas]
+        max_messages:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+        context:
+          type: object
+          additionalProperties: true
+
+    SessionResponse:
+      type: object
+      required:
+        - id
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
+        context:
+          type: object
+          additionalProperties: true
+        provider_preference:
+          type: string
+          enum: [openai, huawei_maas]
+        max_messages:
+          type: integer
+
+    Message:
+      type: object
+      required:
+        - role
+        - content
+      properties:
+        role:
+          type: string
+          enum: [user, assistant, tool]
+        content:
+          type: string
+        tool_calls:
+          type: array
+          items:
+            type: object
+        tool_call_id:
+          type: string
+
+    Error:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+        request_id:
+          type: string
+          format: uuid
+        timestamp:
+          type: string
+          format: date-time
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds until rate limit resets
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Bearer token authentication

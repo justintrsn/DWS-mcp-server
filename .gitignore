@@ -210,4 +210,4 @@ __marimo__/
 
 # Specify
 .specify
-specs/
+specs/001-build-dws-mcp-server/
