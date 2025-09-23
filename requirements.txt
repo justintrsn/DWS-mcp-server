@@ -6,6 +6,7 @@ python-dotenv>=1.0.0
 fastapi>=0.100.0
 uvicorn>=0.20.0
 openai>=1.0.0
+# asyncio is built-in with Python 3.11+
 
 # Testing dependencies
 pytest>=7.0.0

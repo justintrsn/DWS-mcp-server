@@ -12,10 +12,27 @@ PostgreSQL MCP (Model Context Protocol) server providing safe database operation
 
 ## Key Components
 
-### MCP Tools
-1. **get_metadata**: Retrieve database schema information
-2. **select_data**: Query data with column/row limits
-3. **execute_filter**: Apply safe filtered queries
+### MCP Tools - Phase 1 (Enhanced)
+1. **get_tables**: Enhanced with owner, type, size
+2. **get_columns**: Enhanced with comments, foreign keys
+3. **get_table_stats**: Enhanced with toast size
+
+### MCP Tools - Phase 2 (Database Level)
+4. **list_schemas**: All schemas with classification
+5. **get_database_stats**: Overall database metrics
+6. **get_connection_info**: Connection pool status
+
+### MCP Tools - Phase 3 (Object Level)
+7. **describe_object**: Universal object inspector
+8. **explain_query**: Query plan analyzer
+9. **list_views**, **list_functions**, **list_indexes**: Object listings
+10. **get_table_constraints**: Constraint information
+11. **get_dependencies**: Dependency analysis
+
+### MCP Tools - Phase 4 (Optional/Extensions)
+12. **get_top_queries**: Performance analysis (pg_stat_statements)
+13. **get_index_recommendations**: AI-powered suggestions (hypopg)
+14. **check_database_health**: Comprehensive health metrics
 
 ### Core Features
 - Connection pooling (10 max connections)
@@ -110,9 +127,10 @@ python -m src.cli.mcp_server
 - No DDL operations allowed
 
 ## Recent Changes
-- Initial implementation of MCP tools
-- Connection pool with queue management
-- Token bucket rate limiting
+- Enhanced existing MCP tools with metadata (003)
+- Added 10+ new PostgreSQL introspection tools (003)
+- Implemented extension detection for optional features (003)
+- Added comprehensive database health monitoring (003)
 
 ---
 *Generated for PostgreSQL MCP Server v1.0.0*

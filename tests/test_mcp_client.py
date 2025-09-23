@@ -132,6 +132,20 @@ class TestMCPClient:
             print(f"❌ Session initialization failed: {e}")
             return False
 
+    def parse_result(self, result):
+        """Helper method to parse MCP result"""
+        if hasattr(result, 'content'):
+            content = result.content
+            if isinstance(content, list):
+                for item in content:
+                    if hasattr(item, 'text'):
+                        return json.loads(item.text)
+            elif hasattr(content, 'text'):
+                return json.loads(content.text)
+            else:
+                return content
+        return result
+
     async def cleanup(self):
         """Clean up connections"""
         if hasattr(self, '_session_context'):
@@ -171,7 +185,13 @@ class TestMCPClient:
             if tables:
                 print("   Tables (first 5):")
                 for table in tables[:5]:
-                    print(f"   - {table}")
+                    if isinstance(table, dict):
+                        # Enhanced format with metadata
+                        print(f"   - {table.get('table_name', 'unknown')}")
+                        print(f"     Schema: {table.get('schema', 'N/A')}, Owner: {table.get('owner', 'N/A')}, Size: {table.get('size_pretty', 'N/A')}")
+                    else:
+                        # Old format (just string)
+                        print(f"   - {table}")
             return True
 
         except Exception as e:
@@ -184,8 +204,8 @@ class TestMCPClient:
         print("-" * 40)
 
         try:
-            # First get list of tables
-            list_result = await self.session.call_tool("list_tables", {})
+            # First get list of tables from public schema to avoid system tables
+            list_result = await self.session.call_tool("list_tables", {"schema": "public"})
 
             # Parse result
             if hasattr(list_result, 'content'):
@@ -204,11 +224,40 @@ class TestMCPClient:
 
             tables = list_data.get('tables', [])
             if not tables:
-                print("⚠️  No tables found to describe")
-                return False
+                # Try getting all tables if no public schema tables
+                print("   No tables in public schema, trying all schemas...")
+                list_result = await self.session.call_tool("list_tables", {})
+                list_data = self.parse_result(list_result)
+                tables = list_data.get('tables', [])
 
-            # Describe first table
-            table_name = tables[0]
+                if not tables:
+                    print("⚠️  No tables found to describe")
+                    return False
+
+            # Get first user table name (skip system tables)
+            table_name = None
+            for table in tables:
+                if isinstance(table, dict):
+                    name = table.get('table_name')
+                    # Skip system/internal tables
+                    if name and not name.startswith('_') and not name.startswith('pg_') and not name.startswith('gs_'):
+                        table_name = name
+                        # Prefer 'users' table if available
+                        if name == 'users':
+                            break
+                else:
+                    if not table.startswith('_') and not table.startswith('pg_') and not table.startswith('gs_'):
+                        table_name = table
+                        if table == 'users':
+                            break
+
+            # Fallback to first table if no user tables found
+            if not table_name:
+                first_table = tables[0]
+                if isinstance(first_table, dict):
+                    table_name = first_table.get('table_name', first_table)
+                else:
+                    table_name = first_table
             print(f"   Describing table: {table_name}")
 
             result = await self.session.call_tool("describe_table", {
@@ -239,7 +288,30 @@ class TestMCPClient:
             if columns:
                 print("   Columns (first 5):")
                 for col in columns[:5]:
-                    print(f"   - {col.get('column_name')}: {col.get('data_type')}")
+                    col_info = f"   - {col.get('column_name')}: {col.get('data_type')}"
+                    if col.get('primary_key'):
+                        col_info += " [PK]"
+                    if col.get('nullable') == False:
+                        col_info += " NOT NULL"
+                    if col.get('comment'):
+                        col_info += f" // {col.get('comment')}"
+                    print(col_info)
+
+                    # Show foreign key if present
+                    if col.get('foreign_key'):
+                        fk = col['foreign_key']
+                        print(f"     → FK: {fk.get('references_table')}.{fk.get('references_column')}")
+
+                    # Show indexes if present
+                    if col.get('in_indexes'):
+                        print(f"     Indexes: {', '.join(col['in_indexes'])}")
+
+            # Show constraints if present
+            constraints = data.get('constraints', [])
+            if constraints:
+                print(f"   Constraints ({len(constraints)} total):")
+                for const in constraints[:3]:
+                    print(f"   - {const.get('constraint_type')}: {const.get('constraint_name')}")
             return True
 
         except Exception as e:
@@ -252,8 +324,8 @@ class TestMCPClient:
         print("-" * 40)
 
         try:
-            # First get list of tables
-            list_result = await self.session.call_tool("list_tables", {})
+            # First get list of tables from public schema
+            list_result = await self.session.call_tool("list_tables", {"schema": "public"})
 
             # Parse result
             if hasattr(list_result, 'content'):
@@ -272,11 +344,40 @@ class TestMCPClient:
 
             tables = list_data.get('tables', [])
             if not tables:
-                print("⚠️  No tables found to get statistics")
-                return False
+                # Try all schemas if no public tables
+                print("   No tables in public schema, trying all schemas...")
+                list_result = await self.session.call_tool("list_tables", {})
+                list_data = self.parse_result(list_result)
+                tables = list_data.get('tables', [])
 
-            # Get stats for first table
-            table_name = tables[0]
+                if not tables:
+                    print("⚠️  No tables found to get statistics")
+                    return False
+
+            # Get first user table name (skip system tables)
+            table_name = None
+            for table in tables:
+                if isinstance(table, dict):
+                    name = table.get('table_name')
+                    # Skip system/internal tables
+                    if name and not name.startswith('_') and not name.startswith('pg_') and not name.startswith('gs_'):
+                        table_name = name
+                        # Prefer 'users' table if available
+                        if name == 'users':
+                            break
+                else:
+                    if not table.startswith('_') and not table.startswith('pg_') and not table.startswith('gs_'):
+                        table_name = table
+                        if table == 'users':
+                            break
+
+            # Fallback to first table if no user tables found
+            if not table_name:
+                first_table = tables[0]
+                if isinstance(first_table, dict):
+                    table_name = first_table.get('table_name', first_table)
+                else:
+                    table_name = first_table
             print(f"   Getting statistics for: {table_name}")
 
             result = await self.session.call_tool("table_statistics", {
@@ -307,8 +408,22 @@ class TestMCPClient:
                 # Single table response
                 print(f"✅ Statistics for {data.get('table_name')}:")
                 print(f"   - Row count: {data.get('row_count', 'N/A')}")
-                print(f"   - Table size: {data.get('table_size', 'N/A')}")
+                print(f"   - Dead rows: {data.get('dead_rows', 0)}")
+                print(f"   - Table size: {data.get('table_size_bytes', 'N/A')} bytes")
+                print(f"   - Index size: {data.get('index_size_bytes', 'N/A')} bytes")
+
+                # Enhanced: TOAST and total sizes
+                toast_size = data.get('toast_size_bytes', 0)
+                if toast_size > 0:
+                    print(f"   - TOAST size: {toast_size} bytes ({data.get('toast_size', 'N/A')})")
+
+                total_size = data.get('total_relation_size_bytes')
+                if total_size:
+                    print(f"   - Total size: {total_size} bytes ({data.get('total_relation_size', 'N/A')})")
+
                 print(f"   - Index count: {data.get('index_count', 'N/A')}")
+                print(f"   - Last vacuum: {data.get('last_vacuum', 'Never')}")
+                print(f"   - Last analyze: {data.get('last_analyze', 'Never')}")
             elif 'statistics' in data:
                 # Legacy format
                 stats = data.get('statistics', {})
@@ -318,11 +433,13 @@ class TestMCPClient:
                     print(f"   - Table size: {stats.get('table_size', 'N/A')}")
                     print(f"   - Index count: {stats.get('index_count', 'N/A')}")
                 elif isinstance(stats, list) and stats:
-                    stat = stats[0]
-                    print(f"✅ Statistics for {stat.get('table_name', table_name)}:")
-                    print(f"   - Row count: {stat.get('row_count', 'N/A')}")
-                    print(f"   - Table size: {stat.get('table_size', 'N/A')}")
-                    print(f"   - Index count: {stat.get('index_count', 'N/A')}")
+                    print(f"✅ Statistics for {len(stats)} tables:")
+                    for stat in stats[:3]:  # Show first 3 tables
+                        print(f"\n   Table: {stat.get('table_name', 'unknown')}")
+                        print(f"   - Row count: {stat.get('row_count', 'N/A')}")
+                        print(f"   - Total size: {stat.get('total_relation_size', stat.get('table_size', 'N/A'))}")
+                        print(f"   - TOAST size: {stat.get('toast_size', '0 bytes')}")
+                        print(f"   - Index count: {stat.get('index_count', 'N/A')}")
             return True
 
         except Exception as e:
