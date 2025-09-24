@@ -1,0 +1,109 @@
+testing:
+  # Global tool call limits for safety
+  max_tool_calls_global: 10
+  max_tool_calls_per_query: 5
+
+  # Timeout settings
+  default_timeout_seconds: 30
+  max_timeout_seconds: 60
+
+  # Retry and error handling
+  retry_attempts: 2
+  retry_delay_seconds: 1
+  continue_on_error: true
+
+  # Logging and debugging
+  log_conversation_history: true
+  log_tool_call_details: true
+  verbose_output: true
+  save_failed_scenarios: true
+
+llm_settings:
+  # OpenAI configuration
+  model: "gpt-4o-mini"
+  temperature: 0.3
+  max_tokens: 1500
+
+  # Tool calling behavior
+  tool_choice: "auto"
+  parallel_tool_calls: false
+
+  # Response formatting
+  system_prompt: |
+    You are an expert database analyst helping users understand their PostgreSQL database.
+    Use the available MCP tools to analyze the database structure, content, and quality.
+    Be thorough but concise in your analysis.
+    Always explain what you found and why it's relevant.
+    If you encounter errors, explain them clearly and suggest alternatives.
+
+validation:
+  # Response quality checks
+  require_tool_calls: true
+  min_response_length: 50
+  validate_expected_entities: true
+  check_tool_usage_appropriateness: true
+
+  # Content validation
+  require_database_context: true
+  validate_entity_mentions: true
+  check_error_handling: true
+
+  # Scoring criteria
+  scoring:
+    tool_usage_weight: 0.3
+    content_relevance_weight: 0.3
+    entity_coverage_weight: 0.2
+    response_quality_weight: 0.2
+
+reporting:
+  # Output formats
+  generate_summary_report: true
+  save_individual_results: true
+  create_comparison_charts: false
+
+  # Report content
+  include_conversation_logs: true
+  include_tool_call_analysis: true
+  include_performance_metrics: true
+  include_validation_details: true
+
+  # File locations
+  results_directory: "tests/results"
+  report_filename_template: "scenario_results_{timestamp}.json"
+  summary_filename: "test_summary.md"
+
+scenarios:
+  # Default overrides for all scenarios
+  defaults:
+    max_tool_calls: 5
+    timeout_seconds: 30
+    retry_on_failure: true
+
+  # Scenario-specific overrides
+  overrides:
+    comprehensive_analysis:
+      max_tool_calls: 10
+      timeout_seconds: 60
+    edge_case_testing:
+      continue_on_error: true
+      expect_failures: true
+
+database:
+  # Expected database characteristics
+  expected_database_name: "test_footfall"
+  expected_tables: ["anime", "studios"]
+  expected_row_counts:
+    anime: 15
+    studios: 10
+
+  # Data validation
+  expected_columns:
+    anime: ["anime_id", "title", "score", "episodes", "studio_id"]
+    studios: ["studio_id", "name", "founded_year", "country"]
+
+  expected_relationships:
+    - type: "foreign_key"
+      from_table: "anime"
+      from_column: "studio_id"
+      to_table: "studios"
+      to_column: "studio_id"

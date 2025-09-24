@@ -1,0 +1,54 @@
+tool_categories:
+  database:
+    description: "Database-level operations and metrics"
+    tools:
+      - database_stats
+      - get_database_stats
+      - connection_info
+      - get_connection_info
+    test_priority: high
+    requires_connection: true
+
+  schema:
+    description: "Schema-level operations"
+    tools:
+      - schemas_list
+      - list_schemas
+    test_priority: medium
+    requires_connection: true
+
+  table:
+    description: "Table-level operations and statistics"
+    tools:
+      - list_tables
+      - get_tables
+      - describe_table
+      - get_columns
+      - table_statistics
+      - get_table_stats
+      - column_statistics
+      - get_column_statistics
+    test_priority: high
+    requires_connection: true
+
+  object:
+    description: "Database object operations"
+    tools:
+      - describe_object
+      - explain_query
+      - list_views
+      - list_functions
+      - list_indexes
+      - get_table_constraints
+      - get_dependencies
+    test_priority: medium
+    requires_connection: true
+
+  query:
+    description: "Query execution tools (future)"
+    tools:
+      - execute_query
+      - execute_saved_query
+    test_priority: critical
+    requires_connection: true
+    safety_validation: required

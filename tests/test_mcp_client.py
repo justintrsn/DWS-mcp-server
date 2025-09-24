@@ -1,24 +1,23 @@
 #!/usr/bin/env python3
 """
-Test MCP Client for PostgreSQL MCP Server
-Supports both stdio and SSE transports
+PostgreSQL MCP Server Test Runner
+Refactored to use modular tool testers organized by category
 """
 
 import asyncio
 import json
 import os
 import sys
-import subprocess
 import argparse
+import socket
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 # Add parent directory to path if needed
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mcp import ClientSession
-from mcp.client.sse import sse_client
-from mcp.client.stdio import stdio_client, StdioServerParameters
+from client.base_test_mcp import BaseTestMCP, TestResult, TestStatus
+from client.tool_testers import DatabaseToolTester, SchemaToolTester, TableToolTester, ObjectToolTester
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
 
@@ -27,23 +26,15 @@ env_path = Path(__file__).parent.parent / '.env'
 load_dotenv(env_path)
 
 
-class TestMCPClient:
+class TestMCPRunner(BaseTestMCP):
+    """Main test runner that orchestrates all tool category tests"""
+
     def __init__(self, transport: str = "sse", port: int = 3000):
-        """Initialize test client.
+        super().__init__(transport, port)
 
-        Args:
-            transport: Transport type ('sse' or 'stdio')
-            port: Port for SSE transport (default: 3000)
-        """
-        self.transport = transport
-        self.port = port
-
-        # Load configuration from environment
+        # Load configuration from environment for OpenAI integration
         self.api_key = os.getenv("OPENAI_API_KEY")
         self.model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-
-        if transport == "sse":
-            self.mcp_url = f"http://localhost:{port}/sse"
 
         print("📋 Configuration:")
         print(f"   - Transport: {transport}")
@@ -55,411 +46,64 @@ class TestMCPClient:
 
         # Initialize OpenAI client if API key is available
         self.openai = AsyncOpenAI(api_key=self.api_key) if self.api_key else None
-
-        # Session management
-        self.session: Optional[ClientSession] = None
         self.messages: List[Dict[str, Any]] = []
-        self.available_tools = []
-        self.server_process = None
 
-    async def connect(self):
-        """Connect to MCP server"""
-        if self.transport == "sse":
-            print(f"\n🔌 Connecting to MCP server via SSE at {self.mcp_url}...")
+        # Initialize tool testers
+        self.database_tester = DatabaseToolTester(transport, port)
+        self.schema_tester = SchemaToolTester(transport, port)
+        self.table_tester = TableToolTester(transport, port)
+        self.object_tester = ObjectToolTester(transport, port)
 
-            try:
-                self._streams_context = sse_client(url=self.mcp_url)
-                streams = await self._streams_context.__aenter__()
-            except Exception as e:
-                print(f"❌ Connection failed: {e}")
-                return False
+    async def connect_all_testers(self) -> bool:
+        """Connect all tool testers to the MCP server"""
+        print(f"\n🔌 Connecting to MCP server via {self.transport.upper()}...")
 
-        else:  # stdio
-            print(f"\n🔌 Connecting to MCP server via stdio...")
-
-            try:
-                # Start the server process
-                server_params = StdioServerParameters(
-                    command=sys.executable,
-                    args=["-m", "src.cli.mcp_server", "--transport", "stdio"]
-                )
-
-                self._streams_context = stdio_client(server_params)
-                streams = await self._streams_context.__aenter__()
-            except Exception as e:
-                print(f"❌ Connection failed: {e}")
-                return False
-
-        try:
-            self._session_context = ClientSession(*streams)
-            self.session = await self._session_context.__aenter__()
-
-            await self.session.initialize()
-
-            # Get available tools
-            response = await self.session.list_tools()
-            tools = response.tools
-
-            # Convert to OpenAI format
-            self.available_tools = []
-            for tool in tools:
-                openai_tool = {
-                    "type": "function",
-                    "function": {
-                        "name": tool.name,
-                        "description": tool.description or f"Tool: {tool.name}",
-                        "parameters": tool.inputSchema if tool.inputSchema else {
-                            "type": "object",
-                            "properties": {},
-                            "required": []
-                        }
-                    }
-                }
-                self.available_tools.append(openai_tool)
-
-            print(f"✅ Connected successfully!")
-            print(f"📦 Found {len(tools)} tools")
-
-            # List all tools
-            print("\n🔧 Available tools:")
-            for tool in tools:
-                desc = tool.description.split('\n')[0] if tool.description else "No description"
-                print(f"   - {tool.name}: {desc}")
-
-            return True
-
-        except Exception as e:
-            print(f"❌ Session initialization failed: {e}")
+        # Connect main runner first
+        if not await self.connect():
             return False
 
-    def parse_result(self, result):
-        """Helper method to parse MCP result"""
-        if hasattr(result, 'content'):
-            content = result.content
-            if isinstance(content, list):
-                for item in content:
-                    if hasattr(item, 'text'):
-                        return json.loads(item.text)
-            elif hasattr(content, 'text'):
-                return json.loads(content.text)
-            else:
-                return content
-        return result
+        print("✅ Connected successfully!")
+        print(f"📦 Found {len(self.available_tools)} tools")
 
-    async def cleanup(self):
-        """Clean up connections"""
-        if hasattr(self, '_session_context'):
-            await self._session_context.__aexit__(None, None, None)
-        if hasattr(self, '_streams_context'):
-            await self._streams_context.__aexit__(None, None, None)
+        # List all tools
+        print("\n🔧 Available tools:")
+        for tool in self.available_tools:
+            desc = tool["description"].split('\n')[0] if tool["description"] else "No description"
+            print(f"   - {tool['name']}: {desc}")
 
-    async def test_list_tables(self):
-        """Test listing database tables"""
-        print("\n🧪 Test 1: List Database Tables")
-        print("-" * 40)
+        # Connect all testers by sharing connection details
+        for tester in [self.database_tester, self.schema_tester, self.table_tester, self.object_tester]:
+            # Share the connection from main runner
+            tester.session = self.session
+            tester.connected = self.connected
+            tester.available_tools = self.available_tools
+            tester._streams_context = self._streams_context
+            tester._session_context = self._session_context
 
-        try:
-            result = await self.session.call_tool("list_tables", {})
+        return True
 
-            # Parse result
-            if hasattr(result, 'content'):
-                content = result.content
-                if isinstance(content, list):
-                    for item in content:
-                        if hasattr(item, 'text'):
-                            data = json.loads(item.text)
-                            break
-                elif hasattr(content, 'text'):
-                    data = json.loads(content.text)
-                else:
-                    data = content
-            else:
-                data = result
+    async def cleanup_all_testers(self):
+        """Clean up all connections"""
+        await self.disconnect()
 
-            if 'error' in data:
-                print(f"⚠️  Error: {data['error']}")
-                return False
-
-            print(f"✅ Found {data.get('count', 0)} tables")
-            tables = data.get('tables', [])
-            if tables:
-                print("   Tables (first 5):")
-                for table in tables[:5]:
-                    if isinstance(table, dict):
-                        # Enhanced format with metadata
-                        print(f"   - {table.get('table_name', 'unknown')}")
-                        print(f"     Schema: {table.get('schema', 'N/A')}, Owner: {table.get('owner', 'N/A')}, Size: {table.get('size_pretty', 'N/A')}")
-                    else:
-                        # Old format (just string)
-                        print(f"   - {table}")
-            return True
-
-        except Exception as e:
-            print(f"❌ Failed: {e}")
-            return False
-
-    async def test_describe_table(self):
-        """Test describing a table structure"""
-        print("\n🧪 Test 2: Describe Table Structure")
-        print("-" * 40)
-
-        try:
-            # First get list of tables from public schema to avoid system tables
-            list_result = await self.session.call_tool("list_tables", {"schema": "public"})
-
-            # Parse result
-            if hasattr(list_result, 'content'):
-                content = list_result.content
-                if isinstance(content, list):
-                    for item in content:
-                        if hasattr(item, 'text'):
-                            list_data = json.loads(item.text)
-                            break
-                elif hasattr(content, 'text'):
-                    list_data = json.loads(content.text)
-                else:
-                    list_data = list_result
-            else:
-                list_data = list_result
-
-            tables = list_data.get('tables', [])
-            if not tables:
-                # Try getting all tables if no public schema tables
-                print("   No tables in public schema, trying all schemas...")
-                list_result = await self.session.call_tool("list_tables", {})
-                list_data = self.parse_result(list_result)
-                tables = list_data.get('tables', [])
-
-                if not tables:
-                    print("⚠️  No tables found to describe")
-                    return False
-
-            # Get first user table name (skip system tables)
-            table_name = None
-            for table in tables:
-                if isinstance(table, dict):
-                    name = table.get('table_name')
-                    # Skip system/internal tables
-                    if name and not name.startswith('_') and not name.startswith('pg_') and not name.startswith('gs_'):
-                        table_name = name
-                        # Prefer 'users' table if available
-                        if name == 'users':
-                            break
-                else:
-                    if not table.startswith('_') and not table.startswith('pg_') and not table.startswith('gs_'):
-                        table_name = table
-                        if table == 'users':
-                            break
-
-            # Fallback to first table if no user tables found
-            if not table_name:
-                first_table = tables[0]
-                if isinstance(first_table, dict):
-                    table_name = first_table.get('table_name', first_table)
-                else:
-                    table_name = first_table
-            print(f"   Describing table: {table_name}")
-
-            result = await self.session.call_tool("describe_table", {
-                "table_name": table_name
-            })
-
-            # Parse result
-            if hasattr(result, 'content'):
-                content = result.content
-                if isinstance(content, list):
-                    for item in content:
-                        if hasattr(item, 'text'):
-                            data = json.loads(item.text)
-                            break
-                elif hasattr(content, 'text'):
-                    data = json.loads(content.text)
-                else:
-                    data = content
-            else:
-                data = result
-
-            if 'error' in data:
-                print(f"⚠️  Error: {data['error']}")
-                return False
-
-            print(f"✅ Table {data.get('table_name')} has {data.get('column_count', 0)} columns")
-            columns = data.get('columns', [])
-            if columns:
-                print("   Columns (first 5):")
-                for col in columns[:5]:
-                    col_info = f"   - {col.get('column_name')}: {col.get('data_type')}"
-                    if col.get('primary_key'):
-                        col_info += " [PK]"
-                    if col.get('nullable') == False:
-                        col_info += " NOT NULL"
-                    if col.get('comment'):
-                        col_info += f" // {col.get('comment')}"
-                    print(col_info)
-
-                    # Show foreign key if present
-                    if col.get('foreign_key'):
-                        fk = col['foreign_key']
-                        print(f"     → FK: {fk.get('references_table')}.{fk.get('references_column')}")
-
-                    # Show indexes if present
-                    if col.get('in_indexes'):
-                        print(f"     Indexes: {', '.join(col['in_indexes'])}")
-
-            # Show constraints if present
-            constraints = data.get('constraints', [])
-            if constraints:
-                print(f"   Constraints ({len(constraints)} total):")
-                for const in constraints[:3]:
-                    print(f"   - {const.get('constraint_type')}: {const.get('constraint_name')}")
-            return True
-
-        except Exception as e:
-            print(f"❌ Failed: {e}")
-            return False
-
-    async def test_table_statistics(self):
-        """Test getting table statistics"""
-        print("\n🧪 Test 3: Get Table Statistics")
-        print("-" * 40)
-
-        try:
-            # First get list of tables from public schema
-            list_result = await self.session.call_tool("list_tables", {"schema": "public"})
-
-            # Parse result
-            if hasattr(list_result, 'content'):
-                content = list_result.content
-                if isinstance(content, list):
-                    for item in content:
-                        if hasattr(item, 'text'):
-                            list_data = json.loads(item.text)
-                            break
-                elif hasattr(content, 'text'):
-                    list_data = json.loads(content.text)
-                else:
-                    list_data = list_result
-            else:
-                list_data = list_result
-
-            tables = list_data.get('tables', [])
-            if not tables:
-                # Try all schemas if no public tables
-                print("   No tables in public schema, trying all schemas...")
-                list_result = await self.session.call_tool("list_tables", {})
-                list_data = self.parse_result(list_result)
-                tables = list_data.get('tables', [])
-
-                if not tables:
-                    print("⚠️  No tables found to get statistics")
-                    return False
-
-            # Get first user table name (skip system tables)
-            table_name = None
-            for table in tables:
-                if isinstance(table, dict):
-                    name = table.get('table_name')
-                    # Skip system/internal tables
-                    if name and not name.startswith('_') and not name.startswith('pg_') and not name.startswith('gs_'):
-                        table_name = name
-                        # Prefer 'users' table if available
-                        if name == 'users':
-                            break
-                else:
-                    if not table.startswith('_') and not table.startswith('pg_') and not table.startswith('gs_'):
-                        table_name = table
-                        if table == 'users':
-                            break
-
-            # Fallback to first table if no user tables found
-            if not table_name:
-                first_table = tables[0]
-                if isinstance(first_table, dict):
-                    table_name = first_table.get('table_name', first_table)
-                else:
-                    table_name = first_table
-            print(f"   Getting statistics for: {table_name}")
-
-            result = await self.session.call_tool("table_statistics", {
-                "table_name": table_name
-            })
-
-            # Parse result
-            if hasattr(result, 'content'):
-                content = result.content
-                if isinstance(content, list):
-                    for item in content:
-                        if hasattr(item, 'text'):
-                            data = json.loads(item.text)
-                            break
-                elif hasattr(content, 'text'):
-                    data = json.loads(content.text)
-                else:
-                    data = content
-            else:
-                data = result
-
-            if 'error' in data:
-                print(f"⚠️  Error: {data['error']}")
-                return False
-
-            # Handle both single table and multiple table responses
-            if 'table_name' in data:
-                # Single table response
-                print(f"✅ Statistics for {data.get('table_name')}:")
-                print(f"   - Row count: {data.get('row_count', 'N/A')}")
-                print(f"   - Dead rows: {data.get('dead_rows', 0)}")
-                print(f"   - Table size: {data.get('table_size_bytes', 'N/A')} bytes")
-                print(f"   - Index size: {data.get('index_size_bytes', 'N/A')} bytes")
-
-                # Enhanced: TOAST and total sizes
-                toast_size = data.get('toast_size_bytes', 0)
-                if toast_size > 0:
-                    print(f"   - TOAST size: {toast_size} bytes ({data.get('toast_size', 'N/A')})")
-
-                total_size = data.get('total_relation_size_bytes')
-                if total_size:
-                    print(f"   - Total size: {total_size} bytes ({data.get('total_relation_size', 'N/A')})")
-
-                print(f"   - Index count: {data.get('index_count', 'N/A')}")
-                print(f"   - Last vacuum: {data.get('last_vacuum', 'Never')}")
-                print(f"   - Last analyze: {data.get('last_analyze', 'Never')}")
-            elif 'statistics' in data:
-                # Legacy format
-                stats = data.get('statistics', {})
-                if isinstance(stats, dict):
-                    print(f"✅ Statistics for {table_name}:")
-                    print(f"   - Row count: {stats.get('row_count', 'N/A')}")
-                    print(f"   - Table size: {stats.get('table_size', 'N/A')}")
-                    print(f"   - Index count: {stats.get('index_count', 'N/A')}")
-                elif isinstance(stats, list) and stats:
-                    print(f"✅ Statistics for {len(stats)} tables:")
-                    for stat in stats[:3]:  # Show first 3 tables
-                        print(f"\n   Table: {stat.get('table_name', 'unknown')}")
-                        print(f"   - Row count: {stat.get('row_count', 'N/A')}")
-                        print(f"   - Total size: {stat.get('total_relation_size', stat.get('table_size', 'N/A'))}")
-                        print(f"   - TOAST size: {stat.get('toast_size', '0 bytes')}")
-                        print(f"   - Index count: {stat.get('index_count', 'N/A')}")
-            return True
-
-        except Exception as e:
-            print(f"❌ Failed: {e}")
-            return False
-
-    async def test_health_endpoint(self):
+    async def test_health_endpoint(self) -> TestResult:
         """Test health endpoint (SSE transport only)"""
-        print("\n🧪 Test 4: Health Endpoint")
+        print("\n🧪 Test: Health Endpoint")
         print("-" * 40)
 
         if self.transport != "sse":
             print("   Health endpoint test skipped (stdio transport)")
-            return True
+            return TestResult(
+                name="health_endpoint",
+                status=TestStatus.SKIPPED,
+                message="Health endpoint test skipped (stdio transport)"
+            )
 
         try:
             import httpx
             async with httpx.AsyncClient() as client:
                 # Test health endpoint on port 8080 or 8081 (if enabled)
-                health_ports = [8080, 8081]  # Try both common ports
+                health_ports = [8080, 8081]
                 health_found = False
                 for health_port in health_ports:
                     try:
@@ -472,132 +116,80 @@ class TestMCPClient:
                             print(f"   - Uptime: {data.get('uptime_seconds', 'N/A')} seconds")
 
                             # Get database health details
-                            db_status = "N/A"
-                            pool_info = "N/A"
                             try:
                                 db_response = await client.get(f"http://localhost:{health_port}/health/database")
                                 if db_response.status_code == 200:
                                     db_data = db_response.json()
-                                    db_status = db_data.get('status', 'N/A')
-
-                                    # Get pool stats from connection_pool info
-                                    pool = db_data.get('connection_pool', {})
-                                    if pool.get('initialized'):
-                                        min_conn = pool.get('min_connections', 'N/A')
-                                        max_conn = pool.get('max_connections', 'N/A')
-                                        pool_info = f"{min_conn}-{max_conn} connections"
-
-                                elif db_response.status_code == 503 or db_response.status_code == 404:
-                                    # Database service not available or endpoint doesn't exist
-                                    db_status = "unavailable"
+                                    print(f"   - Database: {db_data.get('status', 'N/A')}")
                             except:
-                                pass  # Database endpoint might not exist
-
-                            print(f"   - Database: {db_status}")
-                            print(f"   - Pool stats: {pool_info}")
-
-                            # Get metrics if available
-                            try:
-                                metrics_response = await client.get(f"http://localhost:{health_port}/health/metrics")
-                                if metrics_response.status_code == 200:
-                                    metrics_data = metrics_response.json()
-                                    metrics = metrics_data.get('metrics', {})
-                                    print(f"   - Total requests: {metrics.get('total_requests', 0)}")
-                                    print(f"   - Error rate: {metrics.get('error_rate', 0):.2%}")
-                            except:
-                                pass  # Metrics endpoint might not exist
+                                pass
 
                             health_found = True
                             break
-                        else:
-                            continue
-                    except httpx.ConnectError:
-                        continue  # Try next port
+                    except Exception:
+                        continue
 
                 if not health_found:
-                    print("⚠️  Health API not running on ports 8080 or 8081 (use --health-port to enable)")
-                    # This is OK - health API might be disabled
-                return True
+                    print("⚠️  Health API not running on ports 8080 or 8081")
+                    return TestResult(
+                        name="health_endpoint",
+                        status=TestStatus.SKIPPED,
+                        message="Health API not enabled"
+                    )
+
+            return TestResult(
+                name="health_endpoint",
+                status=TestStatus.PASSED,
+                message="Health endpoint is responding"
+            )
+
         except ImportError:
             print("⚠️  httpx not installed, skipping health endpoint test")
-            return True
+            return TestResult(
+                name="health_endpoint",
+                status=TestStatus.SKIPPED,
+                message="httpx not available"
+            )
         except Exception as e:
-            print(f"❌ Failed to test health endpoint: {e}")
-            return False
+            print(f"❌ Failed: {e}")
+            return TestResult(
+                name="health_endpoint",
+                status=TestStatus.ERROR,
+                message=str(e)
+            )
 
-    async def test_server_info_endpoint(self):
-        """Test server info endpoints (SSE transport only)"""
-        print("\n🧪 Test 5: Server Info Endpoints")
-        print("-" * 40)
-
-        if self.transport != "sse":
-            print("   Server info endpoint test skipped (stdio transport)")
-            return True
-
-        try:
-            import httpx
-            async with httpx.AsyncClient() as client:
-                endpoints_tested = 0
-                endpoints_found = 0
-
-                # Test root endpoint (may not exist in FastMCP)
-                try:
-                    response = await client.get(f"http://localhost:{self.port}/")
-                    endpoints_tested += 1
-                    if response.status_code == 200:
-                        data = response.json()
-                        print(f"✅ Root endpoint responded:")
-                        print(f"   - Status: {data.get('status', 'N/A')}")
-                        print(f"   - Transport: {data.get('transport', 'N/A')}")
-                        endpoints_found += 1
-                    else:
-                        print(f"ℹ️  Root endpoint not available (status {response.status_code})")
-                except Exception:
-                    print(f"ℹ️  Root endpoint not available")
-
-                # Test SSE endpoint (should always exist)
-                try:
-                    response = await client.get(f"http://localhost:{self.port}/sse", headers={"Accept": "text/event-stream"})
-                    endpoints_tested += 1
-                    if response.status_code == 200:
-                        print(f"✅ SSE endpoint available at /sse")
-                        endpoints_found += 1
-                    else:
-                        print(f"⚠️  SSE endpoint returned status {response.status_code}")
-                except Exception as e:
-                    print(f"⚠️  SSE endpoint error: {e}")
-
-                # At least one endpoint should be available
-                if endpoints_found > 0:
-                    print(f"✅ Server endpoints test passed ({endpoints_found}/{endpoints_tested} available)")
-                    return True
-                else:
-                    print(f"❌ No server endpoints available")
-                    return False
-
-        except ImportError:
-            print("⚠️  httpx not installed, skipping server info test")
-            return True
-        except Exception as e:
-            print(f"❌ Failed to test server endpoints: {e}")
-            return False
-
-    async def test_openai_integration(self):
+    async def test_openai_integration(self) -> TestResult:
         """Test OpenAI integration with tools"""
         if not self.openai:
-            print("\n🧪 Test 6: OpenAI Integration (SKIPPED - No API key)")
-            return True
+            print("\n🧪 Test: OpenAI Integration (SKIPPED - No API key)")
+            return TestResult(
+                name="openai_integration",
+                status=TestStatus.SKIPPED,
+                message="No OpenAI API key provided"
+            )
 
-        print("\n🧪 Test 6: OpenAI Integration")
+        print("\n🧪 Test: OpenAI Integration")
         print("-" * 40)
 
         query = "What tables are available in the database?"
         print(f"Query: {query}")
 
-        response = await self.process_query(query)
-        print(f"Response: {response[:300]}..." if len(response) > 300 else f"Response: {response}")
+        try:
+            response = await self.process_query(query)
+            print(f"Response: {response[:300]}..." if len(response) > 300 else f"Response: {response}")
 
-        return True
+            return TestResult(
+                name="openai_integration",
+                status=TestStatus.PASSED,
+                message="OpenAI integration working with MCP tools"
+            )
+        except Exception as e:
+            print(f"❌ Failed: {e}")
+            return TestResult(
+                name="openai_integration",
+                status=TestStatus.ERROR,
+                message=str(e)
+            )
 
     async def process_query(self, query: str) -> str:
         """Process a query using OpenAI and MCP tools"""
@@ -606,12 +198,25 @@ class TestMCPClient:
 
         self.messages.append({"role": "user", "content": query})
 
+        # Convert available tools to OpenAI format
+        openai_tools = []
+        for tool in self.available_tools:
+            openai_tool = {
+                "type": "function",
+                "function": {
+                    "name": tool["name"],
+                    "description": tool["description"] or f"Tool: {tool['name']}",
+                    "parameters": tool["input_schema"]
+                }
+            }
+            openai_tools.append(openai_tool)
+
         try:
             # Call OpenAI with tools
             response = await self.openai.chat.completions.create(
                 model=self.model,
                 messages=self.messages,
-                tools=self.available_tools,
+                tools=openai_tools,
                 tool_choice="auto",
                 temperature=0.7,
                 max_tokens=1000
@@ -649,30 +254,8 @@ class TestMCPClient:
                     print(f"   🔧 Calling tool: {tool_name}")
 
                     try:
-                        result = await self.session.call_tool(tool_name, tool_args)
-
-                        # Parse result
-                        if hasattr(result, 'content'):
-                            if isinstance(result.content, list):
-                                tool_result = ""
-                                for item in result.content:
-                                    if hasattr(item, 'text'):
-                                        tool_result += item.text
-                                    else:
-                                        tool_result += str(item)
-                            elif hasattr(result.content, 'text'):
-                                tool_result = result.content.text
-                            else:
-                                tool_result = str(result.content)
-                        else:
-                            tool_result = str(result)
-
-                        # Try to parse JSON if possible
-                        try:
-                            parsed = json.loads(tool_result)
-                            tool_result = json.dumps(parsed, indent=2)
-                        except:
-                            pass
+                        result = await self.call_tool(tool_name, tool_args)
+                        tool_result = json.dumps(result, indent=2) if result else "No result"
 
                         # Limit size
                         if len(tool_result) > 2000:
@@ -718,320 +301,55 @@ class TestMCPClient:
         except Exception as e:
             return f"Error: {str(e)}"
 
-    async def test_schemas_list(self):
-        """Test the schemas_list tool"""
-        print("\n" + "="*60)
-        print(" TEST: schemas_list tool")
-        print("="*60)
-
-        try:
-            # Test without system schemas
-            result = await self.session.call_tool("schemas_list", {
-                "include_system": False,
-                "include_sizes": False
-            })
-
-            # Parse result
-            data = self.parse_result(result)
-
-            if 'error' in data:
-                print(f"⚠️  Error: {data['error']}")
-                return False
-
-            print(f"✅ Found {data.get('count', 0)} user schemas in database {data.get('database', 'unknown')}")
-
-            # Show first 3 schemas
-            schemas = data.get('schemas', [])
-            for schema in schemas[:3]:
-                print(f"\n   Schema: {schema.get('schema_name', 'unknown')}")
-                print(f"   - Owner: {schema.get('schema_owner', 'N/A')}")
-                print(f"   - Type: {schema.get('schema_type', 'N/A')}")
-                print(f"   - Tables: {schema.get('table_count', 0)}")
-
-            # Test with system schemas and sizes
-            print("\n📊 Testing with system schemas and sizes...")
-            result = await self.session.call_tool("schemas_list", {
-                "include_system": True,
-                "include_sizes": True
-            })
-
-            data = self.parse_result(result)
-            if 'error' not in data:
-                total_schemas = data.get('count', 0)
-                print(f"✅ Found {total_schemas} total schemas (including system)")
-
-                # Show first schema with size
-                schemas = data.get('schemas', [])
-                if schemas:
-                    schema = schemas[0]
-                    if 'size_pretty' in schema:
-                        print(f"   {schema['schema_name']}: {schema['size_pretty']}")
-
-            return True
-
-        except Exception as e:
-            print(f"❌ Failed: {e}")
-            return False
-
-    async def test_database_stats(self):
-        """Test the database_stats tool"""
-        print("\n" + "="*60)
-        print(" TEST: database_stats tool")
-        print("="*60)
-
-        try:
-            result = await self.session.call_tool("database_stats", {})
-
-            # Parse result
-            data = self.parse_result(result)
-
-            if 'error' in data:
-                print(f"⚠️  Error: {data['error']}")
-                return False
-
-            print(f"✅ Database Statistics for {data.get('database_name', 'unknown')}:")
-            print(f"   - Size: {data.get('size_pretty', 'N/A')} ({data.get('size_bytes', 0)} bytes)")
-            print(f"   - Version: {data.get('version', 'N/A')}")
-            print(f"   - Uptime: {data.get('uptime', 'N/A')}")
-            print(f"   - Connections: {data.get('current_connections', 0)}/{data.get('max_connections', 0)}")
-
-            # Show statistics if available
-            stats = data.get('statistics', {})
-            if stats:
-                print(f"\n   Performance Metrics:")
-                print(f"   - Transactions Committed: {stats.get('transactions_committed', 0):,}")
-                print(f"   - Transactions Rolled Back: {stats.get('transactions_rolled_back', 0):,}")
-                print(f"   - Cache Hit Ratio: {stats.get('cache_hit_ratio', 0):.2f}%")
-                print(f"   - Deadlocks: {stats.get('deadlocks', 0)}")
-                print(f"   - Temp Files: {stats.get('temp_files', 0)}")
-
-            return True
-
-        except Exception as e:
-            print(f"❌ Failed: {e}")
-            return False
-
-    async def test_connection_info(self):
-        """Test the connection_info tool"""
-        print("\n" + "="*60)
-        print(" TEST: connection_info tool")
-        print("="*60)
-
-        try:
-            # Test with state grouping
-            result = await self.session.call_tool("connection_info", {
-                "by_state": True,
-                "by_database": False
-            })
-
-            # Parse result
-            data = self.parse_result(result)
-
-            if 'error' in data:
-                print(f"⚠️  Error: {data['error']}")
-                return False
-
-            print(f"✅ Connection Information:")
-            print(f"   - Current: {data.get('current_connections', 0)}/{data.get('max_connections', 0)}")
-            print(f"   - Usage: {data.get('connection_usage_percent', 0):.1f}%")
-            print(f"   - Active Queries: {data.get('active_queries', 0)}")
-            print(f"   - Idle: {data.get('idle_connections', 0)}")
-
-            # Show connections by state
-            by_state = data.get('connections_by_state', {})
-            if by_state:
-                print(f"\n   By State:")
-                for state, count in by_state.items():
-                    if count > 0:
-                        print(f"   - {state}: {count}")
-
-            # Show warnings if any
-            warnings = data.get('warnings', [])
-            if warnings:
-                print(f"\n   ⚠️  Warnings:")
-                for warning in warnings:
-                    print(f"   - {warning}")
-
-            # Test with database grouping
-            print("\n📊 Testing with database grouping...")
-            result = await self.session.call_tool("connection_info", {
-                "by_state": False,
-                "by_database": True
-            })
-
-            data = self.parse_result(result)
-            if 'error' not in data:
-                by_db = data.get('connections_by_database', [])
-                if by_db:
-                    print(f"   Connections by Database:")
-                    for db_info in by_db[:3]:  # Show first 3 databases
-                        print(f"   - {db_info.get('database', 'unknown')}: {db_info.get('count', 0)}")
-
-            return True
-
-        except Exception as e:
-            print(f"❌ Failed: {e}")
-            return False
-
-    async def test_column_statistics(self):
-        """Test the column_statistics tool for outlier detection"""
-        print("\n" + "="*60)
-        print(" TEST: column_statistics tool (Outlier Detection)")
-        print("="*60)
-
-        try:
-            # Find the anime table first
-            result = await self.session.call_tool("list_tables", {"schema": "public"})
-            data = self.parse_result(result)
-
-            tables = data.get('tables', [])
-            anime_table = None
-            for table in tables:
-                if isinstance(table, dict):
-                    if table.get('table_name') == 'anime':
-                        anime_table = 'anime'
-                        break
-                elif table == 'anime':
-                    anime_table = 'anime'
-                    break
-
-            if not anime_table:
-                print("⚠️  'anime' table not found, using first available table")
-                if tables:
-                    first_table = tables[0]
-                    anime_table = first_table.get('table_name') if isinstance(first_table, dict) else first_table
-                else:
-                    print("❌ No tables found for statistics")
-                    return False
-
-            print(f"   Testing column statistics for table: {anime_table}")
-
-            # Test column statistics with outlier detection
-            result = await self.session.call_tool("column_statistics", {
-                "table_name": anime_table,
-                "include_outliers": True,
-                "outlier_method": "iqr"
-            })
-
-            # Parse result
-            data = self.parse_result(result)
-
-            if 'error' in data:
-                print(f"⚠️  Error: {data['error']}")
-                return False
-
-            print(f"✅ Column Statistics Analysis:")
-            print(f"   - Table: {data.get('table_name', 'unknown')}")
-            print(f"   - Columns analyzed: {len(data.get('columns_analyzed', []))}")
-
-            # Display outlier information for each column
-            stats = data.get('statistics', {})
-            outliers_found = False
-            for col in data.get('columns_analyzed', []):
-                if col in stats:
-                    col_stats = stats[col]
-                    if 'outliers' in col_stats:
-                        outliers_found = True
-                        outlier_info = col_stats['outliers']
-                        print(f"\n   📊 {col}:")
-                        print(f"      - Outliers: {outlier_info['count']} ({outlier_info['percentage']:.1f}%)")
-                        print(f"      - Method: {outlier_info['method']}")
-                        if col_stats.get('mean'):
-                            print(f"      - Mean: {col_stats.get('mean'):.2f}")
-                        if col_stats.get('percentiles', {}).get('50%'):
-                            print(f"      - Median: {col_stats.get('percentiles', {}).get('50%'):.2f}")
-
-            if not outliers_found:
-                print("\n   ℹ️  No outliers detected in any columns")
-
-            # Test with natural language prompt
-            print("\n📝 Testing with prompt: 'Is there any outliers in the anime dataset?'")
-            response = await self.process_query("Is there any outliers in the anime dataset?")
-            print(f"Response summary: {response[:200]}..." if len(response) > 200 else f"Response: {response}")
-
-            return True
-        except Exception as e:
-            print(f"❌ Failed to test column statistics: {e}")
-            return False
-
-    async def run_all_tests(self):
-        """Run all tests"""
+    async def run_all_tests(self) -> bool:
+        """Run all test categories"""
         print("\n" + "="*60)
         print(" 🧪 RUNNING ALL TESTS")
         print("="*60)
 
-        tests_passed = 0
-        tests_failed = 0
+        all_results = []
 
-        # Test 1: List tables
-        if await self.test_list_tables():
-            tests_passed += 1
-        else:
-            tests_failed += 1
+        # Run tool category tests
+        print("\n📋 Running Database Tool Tests...")
+        db_results = await self.database_tester.run_all_tests()
+        all_results.extend(db_results)
 
-        # Test 2: Describe table
-        if await self.test_describe_table():
-            tests_passed += 1
-        else:
-            tests_failed += 1
+        print("\n📋 Running Schema Tool Tests...")
+        schema_results = await self.schema_tester.run_all_tests()
+        all_results.extend(schema_results)
 
-        # Test 3: Table statistics
-        if await self.test_table_statistics():
-            tests_passed += 1
-        else:
-            tests_failed += 1
+        print("\n📋 Running Table Tool Tests...")
+        table_results = await self.table_tester.run_all_tests()
+        all_results.extend(table_results)
 
-        # Test 4: Health endpoint (SSE only)
-        if await self.test_health_endpoint():
-            tests_passed += 1
-        else:
-            tests_failed += 1
+        print("\n📋 Running Object Tool Tests...")
+        object_results = await self.object_tester.run_all_tests()
+        all_results.extend(object_results)
 
-        # Test 5: Server info endpoints (SSE only)
-        if await self.test_server_info_endpoint():
-            tests_passed += 1
-        else:
-            tests_failed += 1
+        # Run infrastructure tests
+        print("\n📋 Running Infrastructure Tests...")
+        health_result = await self.test_health_endpoint()
+        all_results.append(health_result)
 
-        # Test 6: OpenAI integration 
-        if await self.test_openai_integration():
-            tests_passed += 1
-        else:
-            tests_failed += 1
-
-        # Test 7: Schemas list 
-        if await self.test_schemas_list():
-            tests_passed += 1
-        else:
-            tests_failed += 1
-
-        # Test 8: Database stats 
-        if await self.test_database_stats():
-            tests_passed += 1
-        else:
-            tests_failed += 1
-
-        # Test 9: Connection info 
-        if await self.test_connection_info():
-            tests_passed += 1
-        else:
-            tests_failed += 1
-
-        # Test 10: Column statistics for outlier detection 
-        if await self.test_column_statistics():
-            tests_passed += 1
-        else:
-            tests_failed += 1
+        openai_result = await self.test_openai_integration()
+        all_results.append(openai_result)
 
         # Summary
+        passed = sum(1 for r in all_results if r.status == TestStatus.PASSED)
+        failed = sum(1 for r in all_results if r.status == TestStatus.FAILED)
+        errors = sum(1 for r in all_results if r.status == TestStatus.ERROR)
+        skipped = sum(1 for r in all_results if r.status == TestStatus.SKIPPED)
+
         print("\n" + "="*60)
         print(" 📊 TEST SUMMARY")
         print("="*60)
-        print(f"✅ Passed: {tests_passed}")
-        print(f"❌ Failed: {tests_failed}")
-        print(f"📈 Success Rate: {(tests_passed/(tests_passed+tests_failed)*100):.1f}%")
+        print(f"✅ Passed: {passed}")
+        print(f"❌ Failed: {failed}")
+        print(f"🔥 Errors: {errors}")
+        print(f"⚠️  Skipped: {skipped}")
+        print(f"📈 Success Rate: {(passed/(passed+failed+errors)*100):.1f}%" if (passed+failed+errors) > 0 else "N/A")
 
-        return tests_failed == 0
+        return failed == 0 and errors == 0
 
 
 async def main():
@@ -1050,8 +368,20 @@ async def main():
         default=3000,
         help="Port for SSE server (default: 3000)"
     )
+    parser.add_argument(
+        "--scenarios",
+        action="store_true",
+        help="Run query scenarios instead of tool category tests"
+    )
 
     args = parser.parse_args()
+
+    # Check if scenarios mode is requested
+    if args.scenarios:
+        print("🎯 Launching Query Scenario Testing...")
+        print("   Use: python tests/test_query_scenarios.py --help for scenario options")
+        os.system(f"python tests/test_query_scenarios.py --transport {args.transport} --port {args.port}")
+        return
 
     print(f"🚀 PostgreSQL MCP Server Test Suite ({args.transport.upper()} Transport)")
     print("="*60)
@@ -1061,13 +391,11 @@ async def main():
         print("⚠️  OPENAI_API_KEY not found in .env file")
         print("   OpenAI integration tests will be skipped")
 
-    # Create test client
-    client = TestMCPClient(transport=args.transport, port=args.port)
+    # Create test runner
+    runner = TestMCPRunner(transport=args.transport, port=args.port)
 
     # For SSE transport, check if server is running
     if args.transport == "sse":
-        # Check if server is already running
-        import socket
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_running = sock.connect_ex(('localhost', args.port)) == 0
         sock.close()
@@ -1080,7 +408,7 @@ async def main():
 
     try:
         # Connect to server
-        if not await client.connect():
+        if not await runner.connect_all_testers():
             print("\n❌ Failed to connect to MCP server")
             if args.transport == "sse":
                 print("Please check:")
@@ -1093,7 +421,7 @@ async def main():
             return
 
         # Run all tests
-        all_passed = await client.run_all_tests()
+        all_passed = await runner.run_all_tests()
 
         if all_passed:
             print("\n✅ All tests passed!")
@@ -1107,7 +435,7 @@ async def main():
         import traceback
         traceback.print_exc()
     finally:
-        await client.cleanup()
+        await runner.cleanup_all_testers()
         print("\n🧹 Cleanup complete")
 
 

@@ -1,0 +1,97 @@
+query_scenarios:
+  database_overview:
+    description: "Get overview of database and its contents"
+    max_tool_calls: 4
+    timeout_seconds: 30
+    queries:
+      - "What's in this database and how big is it?"
+      - "Show me all the tables and their structure"
+      - "What schemas are available in the database?"
+    expected_tools: ["database_stats", "list_tables", "describe_table", "schemas_list"]
+    expected_entities: ["test_footfall", "anime", "studios", "public"]
+    validation:
+      require_database_info: true
+      require_table_list: true
+
+  table_discovery:
+    description: "Explore table structure and relationships"
+    max_tool_calls: 5
+    timeout_seconds: 25
+    queries:
+      - "What tables are available and what do they contain?"
+      - "Describe the structure of the anime table in detail"
+      - "What are the relationships between the anime and studios tables?"
+    expected_tools: ["list_tables", "describe_table"]
+    expected_entities: ["anime", "studios", "studio_id", "PRIMARY KEY", "FOREIGN KEY"]
+    validation:
+      require_column_details: true
+      require_constraint_info: true
+
+  data_quality_analysis:
+    description: "Analyze data quality and find statistical outliers"
+    max_tool_calls: 6
+    timeout_seconds: 35
+    queries:
+      - "Are there any data quality issues in the anime dataset?"
+      - "Find outliers in anime ratings, popularity, and episode counts"
+      - "What are the statistical distributions for numeric columns?"
+    expected_tools: ["column_statistics", "table_statistics"]
+    expected_entities: ["outliers", "score", "popularity", "episodes", "IQR"]
+    validation:
+      require_outlier_analysis: true
+      require_statistical_summary: true
+
+  performance_health:
+    description: "Check database performance and connection health"
+    max_tool_calls: 3
+    timeout_seconds: 20
+    queries:
+      - "How is the database performing right now?"
+      - "What's the current connection status and usage?"
+      - "Are there any performance bottlenecks or warnings?"
+    expected_tools: ["database_stats", "connection_info"]
+    expected_entities: ["transactions", "cache_hit_ratio", "connections", "uptime"]
+    validation:
+      require_performance_metrics: true
+      require_connection_stats: true
+
+  studio_information:
+    description: "Analyze studio data and structure"
+    max_tool_calls: 4
+    timeout_seconds: 25
+    queries:
+      - "Tell me about the studios table - what information does it contain?"
+      - "What are the statistics for the studios data?"
+      - "How many studios are in the database and what are their details?"
+    expected_tools: ["describe_table", "table_statistics", "list_tables"]
+    expected_entities: ["studios", "name", "founded_year", "country", "website"]
+    validation:
+      require_studio_schema: true
+      require_row_counts: true
+
+  comprehensive_analysis:
+    description: "Full database analysis combining multiple aspects"
+    max_tool_calls: 8
+    timeout_seconds: 45
+    queries:
+      - "Give me a comprehensive overview of this anime database - structure, content, and data quality"
+      - "What can you tell me about the relationships and data patterns in this database?"
+    expected_tools: ["database_stats", "list_tables", "describe_table", "table_statistics", "column_statistics", "schemas_list"]
+    expected_entities: ["anime", "studios", "outliers", "statistics", "foreign key", "test_footfall"]
+    validation:
+      require_multi_table_analysis: true
+      require_relationship_explanation: true
+      require_data_quality_assessment: true
+
+  edge_case_testing:
+    description: "Test edge cases and error handling"
+    max_tool_calls: 3
+    timeout_seconds: 20
+    queries:
+      - "What information can you find about a table called 'nonexistent_table'?"
+      - "Analyze the data quality of all tables in the database"
+    expected_tools: ["describe_table", "column_statistics", "table_statistics"]
+    expected_entities: ["error", "not found", "anime", "studios"]
+    validation:
+      expect_error_handling: true
+      require_graceful_fallback: true
