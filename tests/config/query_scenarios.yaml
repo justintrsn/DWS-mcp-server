@@ -95,3 +95,66 @@ query_scenarios:
     validation:
       expect_error_handling: true
       require_graceful_fallback: true
+
+  # Phase 3 Object-Level Scenarios
+  database_objects_overview:
+    description: "Get overview of database objects (views, functions, indexes)"
+    max_tool_calls: 5
+    timeout_seconds: 30
+    queries:
+      - "What views, functions, and indexes exist in this database?"
+      - "Show me all the database objects"
+    expected_tools: ["list_views", "list_functions", "list_indexes"]
+    expected_entities: ["views", "functions", "indexes", "count"]
+    validation:
+      require_object_counts: true
+
+  object_inspection:
+    description: "Inspect specific database objects"
+    max_tool_calls: 4
+    timeout_seconds: 25
+    queries:
+      - "Describe the anime table in detail including all constraints and indexes"
+      - "What can you tell me about this table's structure?"
+    expected_tools: ["describe_object", "get_table_constraints", "list_indexes"]
+    expected_entities: ["columns", "constraints", "indexes", "PRIMARY KEY"]
+    validation:
+      require_constraint_details: true
+      require_index_info: true
+
+  query_performance_analysis:
+    description: "Analyze query performance"
+    max_tool_calls: 3
+    timeout_seconds: 25
+    queries:
+      - "Explain how this query would execute: SELECT * FROM anime WHERE score > 8"
+      - "What's the execution plan?"
+    expected_tools: ["explain_query"]
+    expected_entities: ["Seq Scan", "cost", "rows", "plan"]
+    validation:
+      require_execution_plan: true
+
+  dependency_analysis:
+    description: "Analyze object dependencies"
+    max_tool_calls: 4
+    timeout_seconds: 25
+    queries:
+      - "What are the dependencies for the anime table?"
+      - "What objects depend on this table?"
+    expected_tools: ["get_dependencies", "describe_object"]
+    expected_entities: ["depends_on", "referenced_by", "table"]
+    validation:
+      require_dependency_info: true
+
+  constraint_analysis:
+    description: "Analyze table constraints and relationships"
+    max_tool_calls: 5
+    timeout_seconds: 30
+    queries:
+      - "What are the foreign key relationships in this database?"
+      - "Show me all table constraints"
+    expected_tools: ["get_table_constraints", "list_tables"]
+    expected_entities: ["FOREIGN KEY", "PRIMARY KEY", "constraints", "anime", "studios"]
+    validation:
+      require_foreign_keys: true
+      require_primary_keys: true

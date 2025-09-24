@@ -155,6 +155,25 @@ def describe_object(db_service: DatabaseService,
 
     result = dict(results[0])
 
+    # Add metadata
+    result['object_type'] = object_type
+    result['object_name'] = object_name
+    result['schema_name'] = schema
+
+    # For tables, add column information
+    if object_type == 'table':
+        column_query = """
+            SELECT column_name, data_type, is_nullable, column_default
+            FROM information_schema.columns
+            WHERE table_name = %s AND table_schema = %s
+            ORDER BY ordinal_position
+        """
+        column_results = db_service.execute_readonly_query(column_query, (object_name, schema))
+        result['columns'] = [dict(row) for row in column_results]
+    else:
+        # Ensure columns field exists for other object types
+        result['columns'] = []
+
     # Clean up None values
     return {k: v for k, v in result.items() if v is not None}
 
@@ -326,7 +345,7 @@ def list_functions(db_service: DatabaseService,
 
     Args:
         db_service: Database service instance
-        schema: Schema name (default: public)
+        schema: Schema name (default: public, None = all schemas)
         include_system: Include system functions
 
     Returns:
@@ -334,7 +353,34 @@ def list_functions(db_service: DatabaseService,
     """
     logger.info(f"Listing functions in schema: {schema}")
 
-    query = """
+    # Build WHERE clause based on schema parameter
+    if schema is None:
+        schema_condition = ""
+        query_params = ()
+    else:
+        schema_condition = "n.nspname = %s"
+        query_params = (schema,)
+
+    # Filter system functions if requested
+    system_conditions = []
+    if not include_system:
+        system_conditions = [
+            "p.proname NOT LIKE 'pg_%'",
+            "p.proname NOT LIKE 'gs_%'",
+            "n.nspname NOT IN ('pg_catalog', 'information_schema')"
+        ]
+
+    # Combine all WHERE conditions
+    where_conditions = []
+    if schema_condition:
+        where_conditions.append(schema_condition)
+    where_conditions.extend(system_conditions)
+
+    where_clause = ""
+    if where_conditions:
+        where_clause = "WHERE " + " AND ".join(where_conditions)
+
+    query = f"""
         SELECT
             p.proname as function_name,
             n.nspname as schema_name,
@@ -348,34 +394,21 @@ def list_functions(db_service: DatabaseService,
                 WHEN 's' THEN 'stable'
                 WHEN 'v' THEN 'volatile'
             END as volatility,
-            p.proisagg as is_aggregate,
-            p.proiswindow as is_window,
+            (p.prokind = 'a') as is_aggregate,
+            (p.prokind = 'w') as is_window,
             p.proretset as returns_set
         FROM pg_proc p
         JOIN pg_namespace n ON n.oid = p.pronamespace
         JOIN pg_roles r ON r.oid = p.proowner
         JOIN pg_language l ON l.oid = p.prolang
         JOIN pg_type t ON t.oid = p.prorettype
-        WHERE n.nspname = %s
-        %s
+        {where_clause}
         ORDER BY n.nspname, p.proname
     """
 
-    # Filter system functions if requested
-    system_filter = ""
-    if not include_system:
-        system_filter = """
-            AND p.proname NOT LIKE 'pg_%'
-            AND p.proname NOT LIKE 'gs_%'
-            AND n.nspname NOT IN ('pg_catalog', 'information_schema')
-        """
-
-    # Build query with proper formatting
-    if include_system:
-        formatted_query = query.replace('%s\n', '')
-    else:
-        formatted_query = query.replace('%s', system_filter)
-    results = db_service.execute_readonly_query(formatted_query, (schema,))
+    # Handle empty tuple case by passing None instead
+    params_to_pass = query_params if query_params else None
+    results = db_service.execute_readonly_query(query, params_to_pass)
 
     functions = []
     for row in results:
@@ -444,27 +477,28 @@ def list_indexes(db_service: DatabaseService,
         LEFT JOIN pg_tables t ON t.tablename = i.tablename AND t.schemaname = i.schemaname
         LEFT JOIN pg_stat_user_indexes s ON s.schemaname = i.schemaname
             AND s.indexrelname = i.indexname
-        WHERE i.schemaname = %s
+        WHERE i.schemaname = %%s
         %s
         %s
         ORDER BY i.schemaname, i.tablename, i.indexname
     """
 
-    # Add table filter if specified
-    table_filter = ""
+    # Build the complete query
     params = [schema]
+
+    # Add table filter if specified
+    table_filter = "AND i.tablename = %s" if table_name else ""
     if table_name:
-        table_filter = "AND i.tablename = %s"
         params.append(table_name)
 
     # Add unused filter if requested
-    unused_filter = ""
-    if not include_unused:
-        unused_filter = "AND COALESCE(s.idx_scan, 0) > 0"
+    unused_filter = "AND COALESCE(s.idx_scan, 0) > 0" if not include_unused else ""
 
-    # Build query with proper formatting
-    formatted_query = query.replace('%s', table_filter, 1).replace('%s', unused_filter, 1)
-    results = db_service.execute_readonly_query(formatted_query, tuple(params))
+    # Format query - replace %s placeholders with actual filters
+    final_query = query % (table_filter, unused_filter)
+    # Replace %%s with %s for the schema parameter
+    final_query = final_query.replace('%%s', '%s')
+    results = db_service.execute_readonly_query(final_query, tuple(params))
 
     indexes = []
     warnings = []
@@ -555,11 +589,11 @@ def get_table_constraints(db_service: DatabaseService,
             WHERE tc.table_schema = %s
             AND tc.table_name = %s
         )
-        SELECT DISTINCT
+        SELECT
             constraint_name,
             constraint_type,
             table_name,
-            string_agg(DISTINCT column_name, ', ') OVER (PARTITION BY constraint_name) as columns,
+            column_name as columns,
             definition,
             foreign_table,
             foreign_column,
@@ -605,11 +639,20 @@ def get_table_constraints(db_service: DatabaseService,
 
         constraints.append(constraint_info)
 
+    # Group constraints by type for the test
+    by_type = {}
+    for constraint in constraints:
+        constraint_type = constraint['constraint_type']
+        if constraint_type not in by_type:
+            by_type[constraint_type] = []
+        by_type[constraint_type].append(constraint)
+
     return {
         'table_name': table_name,
         'schema': schema,
         'constraints': constraints,
-        'constraint_count': len(constraints)
+        'constraint_count': len(constraints),
+        'by_type': by_type
     }
 
 
@@ -732,7 +775,7 @@ def get_dependencies(db_service: DatabaseService,
             response['depends_on'] = dependencies
             response['depends_on_count'] = len(dependencies)
         else:
-            response['dependencies'] = dependencies
+            response['depends_on'] = dependencies
 
     if direction in ['dependents', 'both']:
         dependents_results = db_service.execute_readonly_query(dependents_query, (object_name, schema))
@@ -748,10 +791,10 @@ def get_dependencies(db_service: DatabaseService,
             dependents.append(dep)
 
         if direction == 'both':
-            response['dependents'] = dependents
-            response['dependents_count'] = len(dependents)
+            response['referenced_by'] = dependents
+            response['referenced_by_count'] = len(dependents)
         else:
-            response['dependencies'] = dependents
+            response['referenced_by'] = dependents
 
     return response
 

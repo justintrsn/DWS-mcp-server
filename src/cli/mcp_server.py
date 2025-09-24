@@ -19,6 +19,15 @@ from lib.mcp_tools import (
     get_tables, get_columns, get_table_stats, get_column_statistics,
     list_schemas, get_database_stats, get_connection_info
 )
+from lib.tools.objects import (
+    describe_object as describe_object_impl,
+    explain_query as explain_query_impl,
+    list_views as list_views_impl,
+    list_functions as list_functions_impl,
+    list_indexes as list_indexes_impl,
+    get_table_constraints as get_table_constraints_impl,
+    get_dependencies as get_dependencies_impl
+)
 from transport.stdio_server import StdioTransport
 
 # Initialize logging
@@ -317,6 +326,269 @@ async def column_statistics(table_name: str,
         }
     except Exception as e:
         logger.error(f"Unexpected error in column_statistics: {e}")
+        return {
+            'error': f"Unexpected error: {str(e)}",
+            'recoverable': False
+        }
+
+
+# ============================================================================
+# Phase 3 Object-Level Tools (T014-T020)
+# ============================================================================
+
+@mcp.tool()
+async def describe_object(object_name: str,
+                         object_type: Optional[str] = None,
+                         schema: str = 'public') -> Dict[str, Any]:
+    """Universal object inspector for any database object.
+
+    Get detailed information about any database object (table, view, function,
+    index, sequence, etc.) with comprehensive metadata.
+
+    Args:
+        object_name: Name of the object to describe
+        object_type: Optional type hint ('table', 'view', 'function', 'index', etc.)
+        schema: Schema name (default: 'public')
+
+    Returns:
+        Dictionary containing object details specific to its type:
+        - Tables: columns, constraints, indexes, triggers
+        - Views: definition, columns, dependencies
+        - Functions: signature, source code, language
+        - Indexes: columns, type, size
+        - Sequences: current value, increment
+    """
+    try:
+        if not db_service:
+            initialize_database()
+        return describe_object_impl(db_service, object_name, object_type, schema)
+    except MCPError as e:
+        logger.error(f"MCP error in describe_object: {e}")
+        return {
+            'error': str(e),
+            'recoverable': e.recoverable
+        }
+    except Exception as e:
+        logger.error(f"Unexpected error in describe_object: {e}")
+        return {
+            'error': f"Unexpected error: {str(e)}",
+            'recoverable': False
+        }
+
+
+@mcp.tool()
+async def explain_query(query: str,
+                       analyze: bool = False,
+                       format: str = 'json') -> Dict[str, Any]:
+    """Get execution plan for a SQL query.
+
+    Analyze how PostgreSQL will execute a query, including cost estimates,
+    join strategies, and index usage.
+
+    Args:
+        query: SQL query to explain
+        analyze: Execute query and show actual times (default: False)
+        format: Output format ('text', 'json', 'xml', 'yaml', default: 'json')
+
+    Returns:
+        Dictionary containing query plan with:
+        - Execution plan tree
+        - Total cost and time estimates
+        - Index usage information
+        - Join methods and order
+        - Actual vs estimated rows (if analyze=True)
+    """
+    try:
+        if not db_service:
+            initialize_database()
+        return explain_query_impl(db_service, query, analyze, format)
+    except MCPError as e:
+        logger.error(f"MCP error in explain_query: {e}")
+        return {
+            'error': str(e),
+            'recoverable': e.recoverable
+        }
+    except Exception as e:
+        logger.error(f"Unexpected error in explain_query: {e}")
+        return {
+            'error': f"Unexpected error: {str(e)}",
+            'recoverable': False
+        }
+
+
+@mcp.tool()
+async def list_views(schema: Optional[str] = None,
+                    include_system: bool = False) -> Dict[str, Any]:
+    """List all views in the database.
+
+    Args:
+        schema: Optional schema name to filter views (default: all schemas)
+        include_system: Include system views (default: False)
+
+    Returns:
+        Dictionary containing:
+        - views: List of view information
+        - count: Number of views
+        - by_schema: Views grouped by schema
+    """
+    try:
+        if not db_service:
+            initialize_database()
+        return list_views_impl(db_service, schema, include_system)
+    except MCPError as e:
+        logger.error(f"MCP error in list_views: {e}")
+        return {
+            'error': str(e),
+            'recoverable': e.recoverable
+        }
+    except Exception as e:
+        logger.error(f"Unexpected error in list_views: {e}")
+        return {
+            'error': f"Unexpected error: {str(e)}",
+            'recoverable': False
+        }
+
+
+@mcp.tool()
+async def list_functions(schema: Optional[str] = None,
+                        include_system: bool = False) -> Dict[str, Any]:
+    """List all functions and stored procedures.
+
+    Args:
+        schema: Optional schema name to filter (default: all schemas)
+        include_system: Include system functions (default: False)
+
+    Returns:
+        Dictionary containing:
+        - functions: List of function information
+        - count: Number of functions
+        - by_language: Functions grouped by implementation language
+    """
+    try:
+        if not db_service:
+            initialize_database()
+        return list_functions_impl(db_service, schema, include_system)
+    except MCPError as e:
+        logger.error(f"MCP error in list_functions: {e}")
+        return {
+            'error': str(e),
+            'recoverable': e.recoverable
+        }
+    except Exception as e:
+        logger.error(f"Unexpected error in list_functions: {e}")
+        return {
+            'error': f"Unexpected error: {str(e)}",
+            'recoverable': False
+        }
+
+
+@mcp.tool()
+async def list_indexes(table_name: Optional[str] = None,
+                      schema: str = 'public',
+                      include_unused: bool = True) -> Dict[str, Any]:
+    """List indexes for tables.
+
+    Args:
+        table_name: Optional table name (default: all tables)
+        schema: Schema name (default: 'public')
+        include_unused: Include unused indexes (default: True)
+
+    Returns:
+        Dictionary containing:
+        - indexes: List of index information
+        - count: Number of indexes
+        - by_table: Indexes grouped by table
+        - usage_stats: Index scan statistics
+    """
+    try:
+        if not db_service:
+            initialize_database()
+        return list_indexes_impl(db_service, table_name, schema, include_unused)
+    except MCPError as e:
+        logger.error(f"MCP error in list_indexes: {e}")
+        return {
+            'error': str(e),
+            'recoverable': e.recoverable
+        }
+    except Exception as e:
+        logger.error(f"Unexpected error in list_indexes: {e}")
+        return {
+            'error': f"Unexpected error: {str(e)}",
+            'recoverable': False
+        }
+
+
+@mcp.tool()
+async def get_table_constraints(table_name: str,
+                               schema: str = 'public') -> Dict[str, Any]:
+    """Get all constraints for a table.
+
+    Args:
+        table_name: Table name
+        schema: Schema name (default: 'public')
+
+    Returns:
+        Dictionary containing:
+        - constraints: List of constraint details
+        - by_type: Constraints grouped by type
+        - foreign_key_graph: Relationships to other tables
+    """
+    try:
+        if not db_service:
+            initialize_database()
+        return get_table_constraints_impl(db_service, table_name, schema)
+    except InvalidTableError as e:
+        logger.error(f"Invalid table error in get_table_constraints: {e}")
+        return {
+            'error': str(e),
+            'table_name': e.table_name,
+            'recoverable': e.recoverable
+        }
+    except MCPError as e:
+        logger.error(f"MCP error in get_table_constraints: {e}")
+        return {
+            'error': str(e),
+            'recoverable': e.recoverable
+        }
+    except Exception as e:
+        logger.error(f"Unexpected error in get_table_constraints: {e}")
+        return {
+            'error': f"Unexpected error: {str(e)}",
+            'recoverable': False
+        }
+
+
+@mcp.tool()
+async def get_dependencies(object_name: str,
+                          object_type: str,
+                          schema: str = 'public',
+                          direction: str = 'both') -> Dict[str, Any]:
+    """Get object dependencies (what depends on this, what this depends on).
+
+    Args:
+        object_name: Name of the object
+        object_type: Type of object ('table', 'view', 'function', etc.)
+        schema: Schema name (default: 'public')
+        direction: 'depends_on', 'referenced_by', or 'both' (default: 'both')
+
+    Returns:
+        Dictionary containing:
+        - depends_on: Objects this object depends on
+        - referenced_by: Objects that depend on this object
+        - dependency_graph: Visual representation of dependencies
+    """
+    try:
+        if not db_service:
+            initialize_database()
+        return get_dependencies_impl(db_service, object_name, schema, direction)
+    except MCPError as e:
+        logger.error(f"MCP error in get_dependencies: {e}")
+        return {
+            'error': str(e),
+            'recoverable': e.recoverable
+        }
+    except Exception as e:
+        logger.error(f"Unexpected error in get_dependencies: {e}")
         return {
             'error': f"Unexpected error: {str(e)}",
             'recoverable': False
