@@ -7,6 +7,10 @@ from typing import List, Dict, Any, Optional
 from contextlib import contextmanager
 
 from src.models.error_types import ConnectionError, MCPError
+from src.utils.logger import get_logger, log_database_query, log_error_with_context
+
+# Module logger
+logger = get_logger(__name__)
 
 
 class DatabaseService:
@@ -26,13 +30,14 @@ class DatabaseService:
     
     def connect(self) -> bool:
         """Establish database connection pool.
-        
+
         Returns:
             True if connection successful
-            
+
         Raises:
             ConnectionError: If connection fails
         """
+        logger.info(f"Connecting to database: {self.config['host']}:{self.config['port']}/{self.config['database']}")
         try:
             self.pool = psycopg2.pool.ThreadedConnectionPool(
                 minconn=2,
@@ -44,29 +49,35 @@ class DatabaseService:
                 password=self.config['password'],
                 connect_timeout=self.config.get('connect_timeout', 10)
             )
+            logger.info(f"Database connection pool established (size: {self.pool_size})")
             return True
         except psycopg2.Error as e:
+            log_error_with_context(e, {'host': self.config['host'], 'database': self.config['database']}, logger)
             raise ConnectionError(f"Failed to connect to database: {str(e)}")
         except Exception as e:
+            log_error_with_context(e, {'host': self.config['host'], 'database': self.config['database']}, logger)
             raise ConnectionError(f"Failed to connect to database: {str(e)}")
     
     @contextmanager
     def get_connection(self):
         """Get a connection from the pool.
-        
+
         Yields:
             psycopg2 connection object
-            
+
         Raises:
             ConnectionError: If no connection available
         """
         if not self.pool:
+            logger.error("Attempted to get connection but pool not initialized")
             raise ConnectionError("Database connection pool not initialized")
-        
+
         conn = None
         try:
+            logger.debug("Getting connection from pool")
             conn = self.pool.getconn()
             if conn:
+                logger.debug(f"Connection acquired from pool")
                 yield conn
             else:
                 raise ConnectionError("Failed to get connection from pool")
@@ -89,6 +100,7 @@ class DatabaseService:
         Raises:
             MCPError: If query execution fails
         """
+        log_database_query(query, params, logger)
         with self.get_connection() as conn:
             try:
                 with conn.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -100,21 +112,28 @@ class DatabaseService:
 
                     # Fetch all results
                     results = cursor.fetchall()
+                    logger.debug(f"Query returned {len(results)} rows")
 
                     # Convert RealDictRow to regular dict
                     return [dict(row) for row in results]
 
             except psycopg2.errors.UndefinedTable as e:
+                logger.error(f"Table does not exist: {str(e)}")
                 raise MCPError(f"Table does not exist: {str(e)}", recoverable=False)
             except psycopg2.errors.SyntaxError as e:
+                logger.error(f"SQL syntax error: {str(e)}")
                 raise MCPError(f"SQL syntax error: {str(e)}", recoverable=False)
             except psycopg2.errors.InsufficientPrivilege as e:
+                logger.error(f"Permission denied: {str(e)}")
                 raise MCPError(f"Permission denied: {str(e)}", recoverable=False)
             except psycopg2.errors.QueryCanceled as e:
+                logger.warning(f"Query timeout exceeded: {str(e)}")
                 raise MCPError(f"Query timeout exceeded: {str(e)}", recoverable=True)
             except psycopg2.Error as e:
+                logger.error(f"Database error: {str(e)}")
                 raise MCPError(f"Database error: {str(e)}", recoverable=True)
             except Exception as e:
+                log_error_with_context(e, {'query': query[:100], 'params': params}, logger)
                 raise MCPError(f"Unexpected error: {str(e)}", recoverable=False)
 
     def execute_readonly_query(self, query: str, params: Optional[tuple] = None) -> List[Dict[str, Any]]:
@@ -133,6 +152,8 @@ class DatabaseService:
         Raises:
             MCPError: If query execution fails
         """
+        log_database_query(query, params, logger)
+        logger.debug("Executing read-only query")
         with self.get_connection() as conn:
             try:
                 with conn.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -147,6 +168,7 @@ class DatabaseService:
 
                     # Fetch all results
                     results = cursor.fetchall()
+                    logger.debug(f"Read-only query returned {len(results)} rows")
 
                     # Always rollback to end the transaction
                     cursor.execute("ROLLBACK")

@@ -29,6 +29,17 @@ from .table import (
     get_column_statistics
 )
 
+# Object-level tools
+from .objects import (
+    describe_object,
+    explain_query,
+    list_views,
+    list_functions,
+    list_indexes,
+    get_table_constraints,
+    get_dependencies
+)
+
 __all__ = [
     # Database tools
     'get_database_stats',
@@ -39,5 +50,13 @@ __all__ = [
     'get_tables',
     'get_columns',
     'get_table_stats',
-    'get_column_statistics'
+    'get_column_statistics',
+    # Object tools
+    'describe_object',
+    'explain_query',
+    'list_views',
+    'list_functions',
+    'list_indexes',
+    'get_table_constraints',
+    'get_dependencies'
 ]

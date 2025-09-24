@@ -25,7 +25,15 @@ from .tools import (
     get_tables,
     get_columns,
     get_table_stats,
-    get_column_statistics
+    get_column_statistics,
+    # Object-level tools
+    describe_object,
+    explain_query,
+    list_views,
+    list_functions,
+    list_indexes,
+    get_table_constraints,
+    get_dependencies
 )
 
 # Re-export all tools for backward compatibility
@@ -39,7 +47,15 @@ __all__ = [
     'get_tables',
     'get_columns',
     'get_table_stats',
-    'get_column_statistics'
+    'get_column_statistics',
+    # Object tools
+    'describe_object',
+    'explain_query',
+    'list_views',
+    'list_functions',
+    'list_indexes',
+    'get_table_constraints',
+    'get_dependencies'
 ]
 
 # Optional: Add convenience functions or orchestration logic here
