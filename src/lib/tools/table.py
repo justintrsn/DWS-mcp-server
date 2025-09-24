@@ -5,9 +5,9 @@ providing table listing, column information, and statistics.
 """
 
 from typing import Dict, Any, Optional, List, Union
-from lib.logging_config import get_logger
-from models.error_types import MCPError, InvalidTableError
-from services.database_service import DatabaseService
+from src.lib.logging_config import get_logger
+from src.models.error_types import MCPError, InvalidTableError
+from src.services.database_service import DatabaseService
 
 logger = get_logger(__name__)
 
@@ -234,8 +234,8 @@ def get_columns(db_service: DatabaseService,
 
         if not results:
             raise InvalidTableError(
-                f"Table '{schema}.{table_name}' not found",
-                table_name=table_name
+                table_name,
+                f"Table '{schema}.{table_name}' not found"
             )
 
         columns = []
@@ -450,8 +450,8 @@ def get_table_stats(db_service: DatabaseService,
         if not results:
             if len(tables_to_query) == 1:
                 raise InvalidTableError(
-                    f"Table '{tables_to_query[0]}' not found",
-                    table_name=tables_to_query[0]
+                    tables_to_query[0],
+                    f"Table '{tables_to_query[0]}' not found"
                 )
             else:
                 raise MCPError(f"No tables found matching: {', '.join(tables_to_query)}",
@@ -526,3 +526,200 @@ def get_table_stats(db_service: DatabaseService,
     except Exception as e:
         logger.error(f"Error getting table statistics: {e}")
         raise MCPError(f"Failed to get table statistics: {str(e)}", recoverable=True)
+
+
+def get_column_statistics(db_service: DatabaseService,
+                         table_name: str,
+                         column_names: Optional[List[str]] = None,
+                         schema: str = 'public',
+                         include_outliers: bool = True,
+                         outlier_method: str = 'iqr') -> Dict[str, Any]:
+    """Get advanced statistics for numeric columns in a table (pandas-like).
+
+    Args:
+        db_service: Database service instance
+        table_name: Table name to analyze
+        column_names: Optional list of columns to analyze (defaults to all numeric)
+        schema: Schema name (default: 'public')
+        include_outliers: Whether to calculate outliers
+        outlier_method: Method for outlier detection ('iqr' or 'zscore')
+
+    Returns:
+        Dictionary with column statistics including:
+        - Basic stats: count, mean, std, min, max
+        - Percentiles: 25%, 50% (median), 75%
+        - IQR and outliers
+        - Distribution metrics: skewness, mode
+        - Data quality: null count, distinct count
+
+    Raises:
+        InvalidTableError: If table doesn't exist
+        MCPError: If query fails
+    """
+    try:
+        # If no columns specified, get all numeric columns
+        if not column_names:
+            numeric_query = """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = %s
+                AND table_name = %s
+                AND data_type IN ('integer', 'bigint', 'numeric', 'real',
+                                'double precision', 'smallint', 'decimal')
+            """
+            numeric_results = db_service.execute_readonly_query(
+                numeric_query, (schema, table_name)
+            )
+
+            if not numeric_results:
+                # Check if table exists
+                table_check = """
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_schema = %s AND table_name = %s
+                """
+                exists = db_service.execute_readonly_query(table_check, (schema, table_name))
+                if not exists:
+                    raise InvalidTableError(
+                        f"Table '{schema}.{table_name}' not found"
+                    )
+                else:
+                    raise MCPError(
+                        f"No numeric columns found in table {schema}.{table_name}",
+                        recoverable=False
+                    )
+
+            column_names = [row['column_name'] for row in numeric_results]
+
+        # Analyze each column
+        stats = {}
+        columns_analyzed = []
+
+        for column in column_names:
+            # Build comprehensive statistics query using parameterized identifiers
+            stats_query = f"""
+                WITH stats AS (
+                    SELECT
+                        COUNT(*) as count,
+                        COUNT("{column}") as non_null_count,
+                        COUNT(DISTINCT "{column}") as distinct_count,
+                        AVG("{column}"::numeric) as mean,
+                        STDDEV("{column}"::numeric) as std_dev,
+                        VARIANCE("{column}"::numeric) as variance,
+                        MIN("{column}") as min,
+                        MAX("{column}") as max,
+                        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY "{column}") as q1,
+                        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "{column}") as median,
+                        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY "{column}") as q3,
+                        PERCENTILE_CONT(0.05) WITHIN GROUP (ORDER BY "{column}") as p5,
+                        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "{column}") as p95,
+                        MODE() WITHIN GROUP (ORDER BY "{column}") as mode
+                    FROM "{schema}"."{table_name}"
+                )
+                SELECT
+                    *,
+                    (q3 - q1) as iqr,
+                    (q1 - 1.5 * (q3 - q1)) as lower_fence,
+                    (q3 + 1.5 * (q3 - q1)) as upper_fence,
+                    (count - non_null_count) as null_count,
+                    CASE
+                        WHEN std_dev > 0 THEN ((mean - median) * 3) / std_dev
+                        ELSE 0
+                    END as skewness
+                FROM stats
+            """
+
+            try:
+                result = db_service.execute_readonly_query(stats_query)[0]
+
+                # Basic statistics
+                col_stats = {
+                    'count': result['count'],
+                    'non_null_count': result['non_null_count'],
+                    'null_count': result['null_count'],
+                    'null_percentage': round((result['null_count'] / result['count'] * 100), 2) if result['count'] > 0 else 0,
+                    'distinct_count': result['distinct_count'],
+                    'mean': float(result['mean']) if result['mean'] else None,
+                    'std': float(result['std_dev']) if result['std_dev'] else None,
+                    'variance': float(result['variance']) if result['variance'] else None,
+                    'min': float(result['min']) if result['min'] else None,
+                    'max': float(result['max']) if result['max'] else None,
+                    'range': float(result['max'] - result['min']) if result['max'] and result['min'] else None,
+                    'percentiles': {
+                        '5%': float(result['p5']) if result['p5'] else None,
+                        '25%': float(result['q1']) if result['q1'] else None,
+                        '50%': float(result['median']) if result['median'] else None,
+                        '75%': float(result['q3']) if result['q3'] else None,
+                        '95%': float(result['p95']) if result['p95'] else None
+                    },
+                    'iqr': float(result['iqr']) if result['iqr'] else None,
+                    'mode': float(result['mode']) if result['mode'] else None,
+                    'skewness': float(result['skewness']) if result['skewness'] else None
+                }
+
+                # Outlier detection
+                if include_outliers and result['non_null_count'] > 0:
+                    if outlier_method == 'iqr' and result['lower_fence'] is not None:
+                        # IQR method
+                        outlier_query = f"""
+                            SELECT COUNT(*) as outlier_count
+                            FROM "{schema}"."{table_name}"
+                            WHERE "{column}" IS NOT NULL
+                            AND ("{column}" < %s OR "{column}" > %s)
+                        """
+                        outlier_result = db_service.execute_readonly_query(
+                            outlier_query,
+                            (result['lower_fence'], result['upper_fence'])
+                        )[0]
+
+                        col_stats['outliers'] = {
+                            'method': 'IQR',
+                            'lower_fence': float(result['lower_fence']) if result['lower_fence'] else None,
+                            'upper_fence': float(result['upper_fence']) if result['upper_fence'] else None,
+                            'count': outlier_result['outlier_count'],
+                            'percentage': round((outlier_result['outlier_count'] / result['non_null_count'] * 100), 2)
+                        }
+
+                    elif outlier_method == 'zscore' and result['std_dev'] and result['std_dev'] > 0:
+                        # Z-score method (values beyond 3 standard deviations)
+                        zscore_query = f"""
+                            SELECT COUNT(*) as outlier_count
+                            FROM "{schema}"."{table_name}"
+                            WHERE "{column}" IS NOT NULL
+                            AND ABS(("{column}" - %s) / %s) > 3
+                        """
+                        zscore_result = db_service.execute_readonly_query(
+                            zscore_query,
+                            (result['mean'], result['std_dev'])
+                        )[0]
+
+                        col_stats['outliers'] = {
+                            'method': 'Z-score',
+                            'threshold': 3,
+                            'count': zscore_result['outlier_count'],
+                            'percentage': round((zscore_result['outlier_count'] / result['non_null_count'] * 100), 2)
+                        }
+
+                stats[column] = col_stats
+                columns_analyzed.append(column)
+
+            except Exception as e:
+                logger.warning(f"Could not analyze column {column}: {e}")
+                # Continue with other columns
+
+        if not stats:
+            raise MCPError("No columns could be analyzed", recoverable=False)
+
+        return {
+            'table_name': table_name,
+            'schema': schema,
+            'columns_analyzed': columns_analyzed,
+            'statistics': stats
+        }
+
+    except InvalidTableError:
+        raise
+    except MCPError:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting column statistics: {e}")
+        raise MCPError(f"Failed to get column statistics: {str(e)}", recoverable=True)

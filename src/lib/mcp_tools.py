@@ -15,7 +15,7 @@ modular implementations.
 from typing import Dict, Any, Optional, List
 
 # Import all tools from the modular package
-from lib.tools import (
+from .tools import (
     # Database-level tools
     get_database_stats,
     get_connection_info,
@@ -24,7 +24,8 @@ from lib.tools import (
     # Table-level tools
     get_tables,
     get_columns,
-    get_table_stats
+    get_table_stats,
+    get_column_statistics
 )
 
 # Re-export all tools for backward compatibility
@@ -37,7 +38,8 @@ __all__ = [
     # Table tools
     'get_tables',
     'get_columns',
-    'get_table_stats'
+    'get_table_stats',
+    'get_column_statistics'
 ]
 
 # Optional: Add convenience functions or orchestration logic here

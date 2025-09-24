@@ -16,7 +16,7 @@ from models.error_types import MCPError, InvalidTableError
 from services.database_service import DatabaseService
 from services.health_api import HealthAPI
 from lib.mcp_tools import (
-    get_tables, get_columns, get_table_stats,
+    get_tables, get_columns, get_table_stats, get_column_statistics,
     list_schemas, get_database_stats, get_connection_info
 )
 from transport.stdio_server import StdioTransport
@@ -127,20 +127,23 @@ async def describe_table(table_name: str, schema: Optional[str] = None) -> Dict[
 @mcp.tool()
 async def table_statistics(table_name: Optional[str] = None,
                           table_names: Optional[list] = None) -> Dict[str, Any]:
-    """Get statistics for one or more tables.
-    
+    """Get table metadata and storage information (NOT mathematical statistics).
+
+    This tool returns table-level metadata like size, row counts, and maintenance info.
+    For mathematical statistics and outlier detection, use column_statistics instead.
+
     Args:
         table_name: Single table name (optional)
         table_names: List of table names (optional)
-        
+
     Returns:
-        Dictionary containing table statistics including:
+        Dictionary containing table metadata including:
         - row_count: Number of live rows
         - dead_rows: Number of dead rows
-        - table_size: Human-readable size
-        - size_bytes: Size in bytes
+        - table_size: Storage size (bytes and human-readable)
         - index_count: Number of indexes
-        - vacuum/analyze information
+        - vacuum/analyze: Maintenance information
+        - activity: Scan and update metrics
     """
     try:
         if not db_service:
@@ -261,6 +264,59 @@ async def connection_info(by_state: bool = True,
         }
     except Exception as e:
         logger.error(f"Unexpected error in connection_info: {e}")
+        return {
+            'error': f"Unexpected error: {str(e)}",
+            'recoverable': False
+        }
+
+
+@mcp.tool()
+async def column_statistics(table_name: str,
+                           column_names: Optional[list] = None,
+                           schema: str = 'public',
+                           include_outliers: bool = True,
+                           outlier_method: str = 'iqr') -> Dict[str, Any]:
+    """Analyze numeric columns for outliers and statistical distributions.
+
+    Use this tool to detect outliers, analyze data distributions, and get
+    mathematical statistics for numeric columns (similar to pandas describe()).
+
+    Args:
+        table_name: Table name to analyze
+        column_names: Optional list of columns to analyze (defaults to all numeric)
+        schema: Schema name (default: 'public')
+        include_outliers: Whether to detect outliers (default: True)
+        outlier_method: Method for outlier detection ('iqr' or 'zscore', default: 'iqr')
+
+    Returns:
+        Dictionary containing mathematical statistics for each column:
+        - Outlier detection: Count and percentage of outliers
+        - Central tendency: mean, median, mode
+        - Spread: std deviation, variance, IQR, range
+        - Percentiles: 5%, 25%, 50% (median), 75%, 95%
+        - Distribution: skewness
+        - Data quality: null count, distinct values
+    """
+    try:
+        if not db_service:
+            initialize_database()
+        return get_column_statistics(db_service, table_name, column_names,
+                                    schema, include_outliers, outlier_method)
+    except InvalidTableError as e:
+        logger.error(f"Invalid table error in column_statistics: {e}")
+        return {
+            'error': str(e),
+            'table_name': e.table_name,
+            'recoverable': e.recoverable
+        }
+    except MCPError as e:
+        logger.error(f"MCP error in column_statistics: {e}")
+        return {
+            'error': str(e),
+            'recoverable': e.recoverable
+        }
+    except Exception as e:
+        logger.error(f"Unexpected error in column_statistics: {e}")
         return {
             'error': f"Unexpected error: {str(e)}",
             'recoverable': False

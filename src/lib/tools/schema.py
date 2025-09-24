@@ -5,9 +5,10 @@ managing and inspecting database schemas.
 """
 
 from typing import Dict, Any, Optional
-from lib.logging_config import get_logger
-from models.error_types import MCPError
-from services.database_service import DatabaseService
+from src.lib.logging_config import get_logger
+from src.models.error_types import MCPError
+from src.models.tool_responses import SchemaInfo, SchemasListResponse
+from src.services.database_service import DatabaseService
 
 logger = get_logger(__name__)
 
@@ -77,16 +78,19 @@ def list_schemas(db_service: DatabaseService,
 
     schemas = []
     for row in results:
-        schema_info = {
-            'schema_name': row['schema_name'],
-            'schema_owner': row['schema_owner'],
-            'schema_type': row['schema_type'],
-            'table_count': row.get('table_count', 0),
-            'view_count': row.get('view_count', 0),
-            'function_count': row.get('function_count', 0)
-        }
+        # Determine schema type based on name
+        schema_type = 'User Schema'
+        if row['schema_type'] == 'System Information Schema':
+            schema_type = 'System Schema'
+        elif row['schema_type'] == 'System Schema':
+            schema_type = 'System Schema'
+        elif row['schema_type'] == 'Public Schema':
+            schema_type = 'Public Schema'
 
-        # Add sizes if requested (slower query)
+        # Get size information if requested
+        size_bytes = None
+        size_pretty = None
+
         if include_sizes:
             size_query = """
                 SELECT
@@ -101,17 +105,30 @@ def list_schemas(db_service: DatabaseService,
             )
 
             if size_results and size_results[0]['total_size']:
-                total_size = size_results[0]['total_size']
-                schema_info['size_bytes'] = total_size
-                schema_info['size_pretty'] = _format_size(total_size)
+                size_bytes = size_results[0]['total_size']
+                size_pretty = _format_size(size_bytes)
+
+        # Create SchemaInfo model
+        schema_info = SchemaInfo(
+            schema_name=row['schema_name'],
+            schema_owner=row['schema_owner'],
+            schema_type=schema_type,
+            table_count=row.get('table_count', 0),
+            size_bytes=size_bytes,
+            size_pretty=size_pretty
+        )
 
         schemas.append(schema_info)
 
-    return {
-        'database': db_service.config.get('database', 'unknown'),
-        'count': len(schemas),
-        'schemas': schemas
-    }
+    # Create response model
+    response = SchemasListResponse(
+        database=db_service.config.get('database', 'unknown'),
+        count=len(schemas),
+        schemas=schemas
+    )
+
+    # Return as dictionary for MCP transport
+    return response.model_dump(exclude_none=True)
 
 
 def _format_size(size_bytes: int) -> str:

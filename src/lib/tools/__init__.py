@@ -25,7 +25,8 @@ from .schema import (
 from .table import (
     get_tables,
     get_columns,
-    get_table_stats
+    get_table_stats,
+    get_column_statistics
 )
 
 __all__ = [
@@ -37,5 +38,6 @@ __all__ = [
     # Table tools
     'get_tables',
     'get_columns',
-    'get_table_stats'
+    'get_table_stats',
+    'get_column_statistics'
 ]

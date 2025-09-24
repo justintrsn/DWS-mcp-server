@@ -10,8 +10,8 @@ from fastapi.testclient import TestClient
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../src'))
 
-from services.health_api import HealthAPI
-from services.database_service import DatabaseService
+from src.services.health_api import HealthAPI
+from src.services.database_service import DatabaseService
 
 
 class TestHealthAPI:

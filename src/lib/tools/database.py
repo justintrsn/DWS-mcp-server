@@ -5,9 +5,16 @@ providing statistics, connection information, and overall database health.
 """
 
 from typing import Dict, Any
-from lib.logging_config import get_logger
-from models.error_types import MCPError
-from services.database_service import DatabaseService
+from src.lib.logging_config import get_logger
+from src.models.error_types import MCPError
+from src.models.tool_responses import (
+    DatabaseStatistics,
+    DatabaseStatsResponse,
+    ConnectionsByState,
+    ConnectionByDatabase,
+    ConnectionInfoResponse
+)
+from src.services.database_service import DatabaseService
 
 logger = get_logger(__name__)
 
@@ -67,27 +74,34 @@ def get_database_stats(db_service: DatabaseService) -> Dict[str, Any]:
     minutes = (uptime_seconds % 3600) // 60
     uptime_str = f"{days} days {hours:02d}:{minutes:02d}"
 
-    return {
-        'database_name': stats['database_name'],
-        'size_bytes': stats['size_bytes'],
-        'size_pretty': stats['size_pretty'],
-        'connection_limit': stats.get('connection_limit', -1),
-        'current_connections': stats['current_connections'],
-        'max_connections': stats['max_connections'],
-        'version': stats.get('version', 'Unknown'),
-        'server_start_time': str(stats.get('server_start_time', '')),
-        'uptime': uptime_str,
-        'statistics': {
-            'transactions_committed': stats.get('transactions_committed', 0),
-            'transactions_rolled_back': stats.get('transactions_rolled_back', 0),
-            'blocks_read': stats.get('blocks_read', 0),
-            'blocks_hit': stats.get('blocks_hit', 0),
-            'cache_hit_ratio': float(stats.get('cache_hit_ratio', 0)),
-            'temp_files': stats.get('temp_files', 0),
-            'temp_bytes': stats.get('temp_bytes', 0),
-            'deadlocks': stats.get('deadlocks', 0)
-        }
-    }
+    # Create statistics model
+    statistics = DatabaseStatistics(
+        transactions_committed=stats.get('transactions_committed', 0),
+        transactions_rolled_back=stats.get('transactions_rolled_back', 0),
+        blocks_read=stats.get('blocks_read', 0),
+        blocks_hit=stats.get('blocks_hit', 0),
+        cache_hit_ratio=float(stats.get('cache_hit_ratio', 0)),
+        temp_files=stats.get('temp_files', 0),
+        temp_bytes=stats.get('temp_bytes', 0),
+        deadlocks=stats.get('deadlocks', 0)
+    )
+
+    # Create response model
+    response = DatabaseStatsResponse(
+        database_name=stats['database_name'],
+        size_bytes=stats['size_bytes'],
+        size_pretty=stats['size_pretty'],
+        connection_limit=stats.get('connection_limit', -1),
+        current_connections=stats['current_connections'],
+        max_connections=stats['max_connections'],
+        version=stats.get('version', 'Unknown'),
+        server_start_time=str(stats.get('server_start_time', '')) if stats.get('server_start_time') else None,
+        uptime=uptime_str,
+        statistics=statistics
+    )
+
+    # Return as dictionary for MCP transport
+    return response.model_dump(exclude_none=True)
 
 
 def get_connection_info(db_service: DatabaseService,
@@ -126,31 +140,27 @@ def get_connection_info(db_service: DatabaseService,
 
     conn_info = results[0]
 
-    response = {
-        'current_connections': conn_info['current_connections'],
-        'max_connections': conn_info['max_connections'],
-        'idle_connections': conn_info['idle_connections'],
-        'active_queries': conn_info['active_queries']
-    }
-
-    # Add connection usage percentage
+    # Calculate connection usage percentage
+    connection_usage_percent = None
     if conn_info['max_connections'] > 0:
-        response['connection_usage_percent'] = round(
+        connection_usage_percent = round(
             (conn_info['current_connections'] / conn_info['max_connections']) * 100, 2
         )
 
-    # Group by state if requested
+    # Create connections by state model if requested
+    connections_by_state = None
     if by_state:
-        response['connections_by_state'] = {
-            'active': conn_info['active_queries'],
-            'idle': conn_info['idle_connections'],
-            'idle_in_transaction': conn_info['idle_in_transaction'],
-            'idle_in_transaction_aborted': conn_info['idle_in_transaction_aborted'],
-            'fastpath_function_call': conn_info['fastpath_function_call'],
-            'disabled': conn_info['disabled']
-        }
+        connections_by_state = ConnectionsByState(
+            active=conn_info['active_queries'],
+            idle=conn_info['idle_connections'],
+            idle_in_transaction=conn_info['idle_in_transaction'],
+            idle_in_transaction_aborted=conn_info['idle_in_transaction_aborted'],
+            fastpath_function_call=conn_info['fastpath_function_call'],
+            disabled=conn_info['disabled']
+        )
 
-    # Group by database if requested
+    # Get connections by database if requested
+    connections_by_database = None
     if by_database:
         db_query = """
             SELECT datname as database, COUNT(*) as count
@@ -161,24 +171,33 @@ def get_connection_info(db_service: DatabaseService,
         """
         db_results = db_service.execute_readonly_query(db_query)
 
-        response['connections_by_database'] = [
-            {'database': row['database'], 'count': row['count']}
+        connections_by_database = [
+            ConnectionByDatabase(database=row['database'], count=row['count'])
             for row in db_results
         ]
 
     # Add warnings for connection saturation
-    usage_percent = response.get('connection_usage_percent', 0)
     warnings = []
-
-    if usage_percent >= 90:
-        warnings.append(f"CRITICAL: Connection usage at {usage_percent}% - consider increasing max_connections")
-    elif usage_percent >= 75:
-        warnings.append(f"WARNING: Connection usage at {usage_percent}% - monitor for potential saturation")
+    if connection_usage_percent:
+        if connection_usage_percent >= 90:
+            warnings.append(f"CRITICAL: Connection usage at {connection_usage_percent}% - consider increasing max_connections")
+        elif connection_usage_percent >= 75:
+            warnings.append(f"WARNING: Connection usage at {connection_usage_percent}% - monitor for potential saturation")
 
     if conn_info.get('idle_in_transaction', 0) > 10:
         warnings.append(f"High number of idle-in-transaction connections ({conn_info['idle_in_transaction']})")
 
-    if warnings:
-        response['warnings'] = warnings
+    # Create response model
+    response = ConnectionInfoResponse(
+        current_connections=conn_info['current_connections'],
+        max_connections=conn_info['max_connections'],
+        idle_connections=conn_info['idle_connections'],
+        active_queries=conn_info['active_queries'],
+        connection_usage_percent=connection_usage_percent,
+        connections_by_state=connections_by_state,
+        connections_by_database=connections_by_database,
+        warnings=warnings if warnings else None
+    )
 
-    return response
+    # Return as dictionary for MCP transport
+    return response.model_dump(exclude_none=True)

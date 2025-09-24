@@ -15,24 +15,25 @@ PostgreSQL MCP (Model Context Protocol) server providing safe database operation
 ### MCP Tools - Phase 1 (Enhanced)
 1. **get_tables**: Enhanced with owner, type, size
 2. **get_columns**: Enhanced with comments, foreign keys
-3. **get_table_stats**: Enhanced with toast size
+3. **get_table_stats**: Enhanced with toast size, activity metrics
+4. **column_statistics**: Advanced pandas-like statistics for numeric columns
 
 ### MCP Tools - Phase 2 (Database Level)
-4. **list_schemas**: All schemas with classification
-5. **get_database_stats**: Overall database metrics
-6. **get_connection_info**: Connection pool status
+5. **list_schemas**: All schemas with classification
+6. **get_database_stats**: Overall database metrics
+7. **get_connection_info**: Connection pool status
 
 ### MCP Tools - Phase 3 (Object Level)
-7. **describe_object**: Universal object inspector
-8. **explain_query**: Query plan analyzer
-9. **list_views**, **list_functions**, **list_indexes**: Object listings
-10. **get_table_constraints**: Constraint information
-11. **get_dependencies**: Dependency analysis
+8. **describe_object**: Universal object inspector
+9. **explain_query**: Query plan analyzer
+10. **list_views**, **list_functions**, **list_indexes**: Object listings
+11. **get_table_constraints**: Constraint information
+12. **get_dependencies**: Dependency analysis
 
 ### MCP Tools - Phase 4 (Optional/Extensions)
-12. **get_top_queries**: Performance analysis (pg_stat_statements)
-13. **get_index_recommendations**: AI-powered suggestions (hypopg)
-14. **check_database_health**: Comprehensive health metrics
+13. **get_top_queries**: Performance analysis (pg_stat_statements)
+14. **get_index_recommendations**: AI-powered suggestions (hypopg)
+15. **check_database_health**: Comprehensive health metrics
 
 ### Core Features
 - Connection pooling (10 max connections)
@@ -131,6 +132,8 @@ python -m src.cli.mcp_server
 - Added 10+ new PostgreSQL introspection tools (003)
 - Implemented extension detection for optional features (003)
 - Added comprehensive database health monitoring (003)
+- Added column_statistics tool for pandas-like statistical analysis
+- Enhanced get_table_stats with activity metrics (scans, updates, etc.)
 
 ---
 *Generated for PostgreSQL MCP Server v1.0.0*

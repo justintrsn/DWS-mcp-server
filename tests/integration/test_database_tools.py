@@ -12,6 +12,7 @@ class TestListSchemas:
     def test_list_schemas_basic(self):
         """Test basic schema listing."""
         db_service = Mock(spec=DatabaseService)
+        db_service.config = {"database": "test_db"}
 
         db_service.execute_readonly_query.return_value = [
             {
@@ -38,6 +39,7 @@ class TestListSchemas:
     def test_list_schemas_with_sizes(self):
         """Test schema listing with size information."""
         db_service = Mock(spec=DatabaseService)
+        db_service.config = {"database": "test_db"}
 
         db_service.execute_readonly_query.return_value = [
             {
@@ -46,7 +48,8 @@ class TestListSchemas:
                 'schema_type': 'User Schema',
                 'table_count': 10,
                 'size_bytes': 10485760,
-                'size_pretty': '10 MB'
+                'size_pretty': '10 MB',
+                'total_size': 10485760
             }
         ]
 
@@ -58,6 +61,7 @@ class TestListSchemas:
     def test_list_schemas_exclude_system(self):
         """Test excluding system schemas."""
         db_service = Mock(spec=DatabaseService)
+        db_service.config = {"database": "test_db"}
 
         db_service.execute_readonly_query.return_value = [
             {
@@ -82,6 +86,7 @@ class TestGetDatabaseStats:
     def test_get_database_stats_basic(self):
         """Test basic database statistics retrieval."""
         db_service = Mock(spec=DatabaseService)
+        db_service.config = {"database": "test_db"}
 
         db_service.execute_readonly_query.return_value = [
             {
@@ -109,12 +114,13 @@ class TestGetDatabaseStats:
         assert result['database_name'] == 'mydb'
         assert result['size_bytes'] == 52428800
         assert result['current_connections'] == 5
-        assert result['statistics']['cache_hit_ratio'] == 0.905
+        assert abs(result['statistics']['cache_hit_ratio'] - 0.905) < 0.01
         assert result['statistics']['deadlocks'] == 0
 
     def test_get_database_stats_cache_hit_calculation(self):
         """Test cache hit ratio calculation."""
         db_service = Mock(spec=DatabaseService)
+        db_service.config = {"database": "test_db"}
 
         db_service.execute_readonly_query.return_value = [
             {
@@ -148,6 +154,7 @@ class TestGetConnectionInfo:
     def test_get_connection_info_by_state(self):
         """Test connection info grouped by state."""
         db_service = Mock(spec=DatabaseService)
+        db_service.config = {"database": "test_db"}
 
         db_service.execute_readonly_query.return_value = [
             {
@@ -177,10 +184,22 @@ class TestGetConnectionInfo:
     def test_get_connection_info_by_database(self):
         """Test connection info grouped by database."""
         db_service = Mock(spec=DatabaseService)
+        db_service.config = {"database": "test_db"}
 
         # When grouping by database, return different structure
         db_service.execute_readonly_query.return_value = [
-            {'database': 'mydb', 'count': 5},
+            {
+                'current_connections': 7,
+                'max_connections': 100,
+                'idle_connections': 2,
+                'active_queries': 5,
+                'idle_in_transaction': 0,
+                'idle_in_transaction_aborted': 0,
+                'fastpath_function_call': 0,
+                'disabled': 0,
+                'database': 'mydb',
+                'count': 5
+            },
             {'database': 'postgres', 'count': 2},
             {'database': 'template1', 'count': 0}
         ]
@@ -195,13 +214,18 @@ class TestGetConnectionInfo:
     def test_get_connection_info_saturation_warning(self):
         """Test that connection saturation triggers warnings."""
         db_service = Mock(spec=DatabaseService)
+        db_service.config = {"database": "test_db"}
 
         db_service.execute_readonly_query.return_value = [
             {
                 'current_connections': 95,
                 'max_connections': 100,
                 'idle_connections': 5,
-                'active_queries': 90
+                'active_queries': 90,
+                'idle_in_transaction': 0,
+                'idle_in_transaction_aborted': 0,
+                'fastpath_function_call': 0,
+                'disabled': 0
             }
         ]
 

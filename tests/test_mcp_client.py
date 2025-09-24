@@ -873,6 +873,87 @@ class TestMCPClient:
             print(f"❌ Failed: {e}")
             return False
 
+    async def test_column_statistics(self):
+        """Test the column_statistics tool for outlier detection"""
+        print("\n" + "="*60)
+        print(" TEST: column_statistics tool (Outlier Detection)")
+        print("="*60)
+
+        try:
+            # Find the anime table first
+            result = await self.session.call_tool("list_tables", {"schema": "public"})
+            data = self.parse_result(result)
+
+            tables = data.get('tables', [])
+            anime_table = None
+            for table in tables:
+                if isinstance(table, dict):
+                    if table.get('table_name') == 'anime':
+                        anime_table = 'anime'
+                        break
+                elif table == 'anime':
+                    anime_table = 'anime'
+                    break
+
+            if not anime_table:
+                print("⚠️  'anime' table not found, using first available table")
+                if tables:
+                    first_table = tables[0]
+                    anime_table = first_table.get('table_name') if isinstance(first_table, dict) else first_table
+                else:
+                    print("❌ No tables found for statistics")
+                    return False
+
+            print(f"   Testing column statistics for table: {anime_table}")
+
+            # Test column statistics with outlier detection
+            result = await self.session.call_tool("column_statistics", {
+                "table_name": anime_table,
+                "include_outliers": True,
+                "outlier_method": "iqr"
+            })
+
+            # Parse result
+            data = self.parse_result(result)
+
+            if 'error' in data:
+                print(f"⚠️  Error: {data['error']}")
+                return False
+
+            print(f"✅ Column Statistics Analysis:")
+            print(f"   - Table: {data.get('table_name', 'unknown')}")
+            print(f"   - Columns analyzed: {len(data.get('columns_analyzed', []))}")
+
+            # Display outlier information for each column
+            stats = data.get('statistics', {})
+            outliers_found = False
+            for col in data.get('columns_analyzed', []):
+                if col in stats:
+                    col_stats = stats[col]
+                    if 'outliers' in col_stats:
+                        outliers_found = True
+                        outlier_info = col_stats['outliers']
+                        print(f"\n   📊 {col}:")
+                        print(f"      - Outliers: {outlier_info['count']} ({outlier_info['percentage']:.1f}%)")
+                        print(f"      - Method: {outlier_info['method']}")
+                        if col_stats.get('mean'):
+                            print(f"      - Mean: {col_stats.get('mean'):.2f}")
+                        if col_stats.get('percentiles', {}).get('50%'):
+                            print(f"      - Median: {col_stats.get('percentiles', {}).get('50%'):.2f}")
+
+            if not outliers_found:
+                print("\n   ℹ️  No outliers detected in any columns")
+
+            # Test with natural language prompt
+            print("\n📝 Testing with prompt: 'Is there any outliers in the anime dataset?'")
+            response = await self.process_query("Is there any outliers in the anime dataset?")
+            print(f"Response summary: {response[:200]}..." if len(response) > 200 else f"Response: {response}")
+
+            return True
+        except Exception as e:
+            print(f"❌ Failed to test column statistics: {e}")
+            return False
+
     async def run_all_tests(self):
         """Run all tests"""
         print("\n" + "="*60)
@@ -912,26 +993,32 @@ class TestMCPClient:
         else:
             tests_failed += 1
 
-        # Test 6: OpenAI integration (if API key available)
+        # Test 6: OpenAI integration 
         if await self.test_openai_integration():
             tests_passed += 1
         else:
             tests_failed += 1
 
-        # Test 7: Schemas list (NEW)
+        # Test 7: Schemas list 
         if await self.test_schemas_list():
             tests_passed += 1
         else:
             tests_failed += 1
 
-        # Test 8: Database stats (NEW)
+        # Test 8: Database stats 
         if await self.test_database_stats():
             tests_passed += 1
         else:
             tests_failed += 1
 
-        # Test 9: Connection info (NEW)
+        # Test 9: Connection info 
         if await self.test_connection_info():
+            tests_passed += 1
+        else:
+            tests_failed += 1
+
+        # Test 10: Column statistics for outlier detection 
+        if await self.test_column_statistics():
             tests_passed += 1
         else:
             tests_failed += 1
