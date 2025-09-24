@@ -9,7 +9,7 @@ services:
       POSTGRES_USER: test_user
       POSTGRES_PASSWORD: test_pass
     ports:
-      - "5433:5432"
+      - "5434:5432"
     volumes:
       - postgres-test-data:/var/lib/postgresql/data
     healthcheck:
