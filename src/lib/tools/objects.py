@@ -10,7 +10,7 @@ from src.utils.logger import get_logger, log_database_query
 logger = get_logger(__name__)
 
 
-def describe_object(db_service: DatabaseService,
+def inspect_database_object(db_service: DatabaseService,
                    object_name: str,
                    object_type: Optional[str] = None,
                    schema: str = 'public') -> Dict[str, Any]:
@@ -178,7 +178,7 @@ def describe_object(db_service: DatabaseService,
     return {k: v for k, v in result.items() if v is not None}
 
 
-def explain_query(db_service: DatabaseService,
+def analyze_query_plan(db_service: DatabaseService,
                  query: str,
                  analyze: bool = False,
                  format: str = 'json') -> Dict[str, Any]:
@@ -263,7 +263,7 @@ def explain_query(db_service: DatabaseService,
         raise MCPError(f"Failed to explain query: {str(e)}")
 
 
-def list_views(db_service: DatabaseService,
+def enumerate_views(db_service: DatabaseService,
               schema: str = 'public',
               include_definition: bool = False) -> Dict[str, Any]:
     """List all views in a schema.
@@ -338,7 +338,7 @@ def list_views(db_service: DatabaseService,
     }
 
 
-def list_functions(db_service: DatabaseService,
+def enumerate_functions(db_service: DatabaseService,
                   schema: str = 'public',
                   include_system: bool = False) -> Dict[str, Any]:
     """List all functions in a schema.
@@ -437,7 +437,7 @@ def list_functions(db_service: DatabaseService,
     }
 
 
-def list_indexes(db_service: DatabaseService,
+def enumerate_indexes(db_service: DatabaseService,
                 table_name: Optional[str] = None,
                 schema: str = 'public',
                 include_unused: bool = True) -> Dict[str, Any]:
@@ -545,7 +545,7 @@ def list_indexes(db_service: DatabaseService,
     return response
 
 
-def get_table_constraints(db_service: DatabaseService,
+def fetch_table_constraints(db_service: DatabaseService,
                          table_name: str,
                          schema: str = 'public') -> Dict[str, Any]:
     """Get all constraints for a specific table.
@@ -656,7 +656,7 @@ def get_table_constraints(db_service: DatabaseService,
     }
 
 
-def get_dependencies(db_service: DatabaseService,
+def analyze_object_dependencies(db_service: DatabaseService,
                     object_name: str,
                     schema: str = 'public',
                     direction: str = 'both') -> Dict[str, Any]:

@@ -27,13 +27,13 @@ from .tools import (
     get_table_stats,
     get_column_statistics,
     # Object-level tools
-    describe_object,
-    explain_query,
-    list_views,
-    list_functions,
-    list_indexes,
-    get_table_constraints,
-    get_dependencies
+    inspect_database_object,
+    analyze_query_plan,
+    enumerate_views,
+    enumerate_functions,
+    enumerate_indexes,
+    fetch_table_constraints,
+    analyze_object_dependencies
 )
 
 # Re-export all tools for backward compatibility
@@ -49,13 +49,13 @@ __all__ = [
     'get_table_stats',
     'get_column_statistics',
     # Object tools
-    'describe_object',
-    'explain_query',
-    'list_views',
-    'list_functions',
-    'list_indexes',
-    'get_table_constraints',
-    'get_dependencies'
+    'inspect_database_object',
+    'analyze_query_plan',
+    'enumerate_views',
+    'enumerate_functions',
+    'enumerate_indexes',
+    'fetch_table_constraints',
+    'analyze_object_dependencies'
 ]
 
 # Optional: Add convenience functions or orchestration logic here

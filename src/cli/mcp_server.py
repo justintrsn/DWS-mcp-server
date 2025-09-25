@@ -17,17 +17,12 @@ from services.database_service import DatabaseService
 from services.health_api import HealthAPI
 from lib.mcp_tools import (
     get_tables, get_columns, get_table_stats, get_column_statistics,
-    list_schemas, get_database_stats, get_connection_info
+    list_schemas, get_database_stats, get_connection_info,
+    inspect_database_object, analyze_query_plan, enumerate_views,
+    enumerate_functions, enumerate_indexes, fetch_table_constraints,
+    analyze_object_dependencies
 )
-from lib.tools.objects import (
-    describe_object as describe_object_impl,
-    explain_query as explain_query_impl,
-    list_views as list_views_impl,
-    list_functions as list_functions_impl,
-    list_indexes as list_indexes_impl,
-    get_table_constraints as get_table_constraints_impl,
-    get_dependencies as get_dependencies_impl
-)
+
 from transport.stdio_server import StdioTransport
 
 # Initialize logging
@@ -361,7 +356,7 @@ async def describe_object(object_name: str,
     try:
         if not db_service:
             initialize_database()
-        return describe_object_impl(db_service, object_name, object_type, schema)
+        return inspect_database_object(db_service, object_name, object_type, schema)
     except MCPError as e:
         logger.error(f"MCP error in describe_object: {e}")
         return {
@@ -401,7 +396,7 @@ async def explain_query(query: str,
     try:
         if not db_service:
             initialize_database()
-        return explain_query_impl(db_service, query, analyze, format)
+        return analyze_query_plan(db_service, query, analyze, format)
     except MCPError as e:
         logger.error(f"MCP error in explain_query: {e}")
         return {
@@ -434,7 +429,7 @@ async def list_views(schema: Optional[str] = None,
     try:
         if not db_service:
             initialize_database()
-        return list_views_impl(db_service, schema, include_system)
+        return enumerate_views(db_service, schema, include_system)
     except MCPError as e:
         logger.error(f"MCP error in list_views: {e}")
         return {
@@ -467,7 +462,7 @@ async def list_functions(schema: Optional[str] = None,
     try:
         if not db_service:
             initialize_database()
-        return list_functions_impl(db_service, schema, include_system)
+        return enumerate_functions(db_service, schema, include_system)
     except MCPError as e:
         logger.error(f"MCP error in list_functions: {e}")
         return {
@@ -503,7 +498,7 @@ async def list_indexes(table_name: Optional[str] = None,
     try:
         if not db_service:
             initialize_database()
-        return list_indexes_impl(db_service, table_name, schema, include_unused)
+        return enumerate_indexes(db_service, table_name, schema, include_unused)
     except MCPError as e:
         logger.error(f"MCP error in list_indexes: {e}")
         return {
@@ -536,7 +531,7 @@ async def get_table_constraints(table_name: str,
     try:
         if not db_service:
             initialize_database()
-        return get_table_constraints_impl(db_service, table_name, schema)
+        return fetch_table_constraints(db_service, table_name, schema)
     except InvalidTableError as e:
         logger.error(f"Invalid table error in get_table_constraints: {e}")
         return {
@@ -580,7 +575,7 @@ async def get_dependencies(object_name: str,
     try:
         if not db_service:
             initialize_database()
-        return get_dependencies_impl(db_service, object_name, schema, direction)
+        return analyze_object_dependencies(db_service, object_name, schema, direction)
     except MCPError as e:
         logger.error(f"MCP error in get_dependencies: {e}")
         return {
