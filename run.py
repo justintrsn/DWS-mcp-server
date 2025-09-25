@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Entry point script for PostgreSQL MCP Server."""
 
+import os
 import sys
 import subprocess
 import argparse
@@ -60,8 +61,9 @@ Examples:
 
     args = parser.parse_args()
 
-    # Build command
-    cmd = [sys.executable, "-m", "src.cli.mcp_server", "--transport", args.transport]
+    # Build command - use module approach with warning suppression
+    # The -W ignore::RuntimeWarning suppresses the harmless RuntimeWarning
+    cmd = [sys.executable, "-W", "ignore::RuntimeWarning", "-m", "src.cli.mcp_server", "--transport", args.transport]
 
     if args.transport == "sse":
         cmd.extend(["--host", args.host, "--port", str(args.port)])
