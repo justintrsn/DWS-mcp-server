@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from fastmcp import FastMCP
 from models.config import DatabaseConfig
 from models.error_types import MCPError, InvalidTableError
+from models.session_state import get_session_state
 from services.database_service import DatabaseService
 from services.health_api import HealthAPI
 from lib.mcp_tools import (
@@ -20,8 +21,9 @@ from lib.mcp_tools import (
     list_schemas, get_database_stats, get_connection_info,
     inspect_database_object, analyze_query_plan, enumerate_views,
     enumerate_functions, enumerate_indexes, fetch_table_constraints,
-    analyze_object_dependencies
+    analyze_object_dependencies, execute_query
 )
+from lib.tools.query import extract_table_names_from_query
 
 from transport.stdio_server import StdioTransport
 
@@ -56,72 +58,113 @@ def initialize_database():
         raise
 
 
-@mcp.tool()
+@mcp.tool(name="discover_tables")
 async def list_tables(schema: Optional[str] = None) -> Dict[str, Any]:
-    """List all tables in the database.
-    
+    """🔍 STEP 1: Discover available tables - START HERE for any database work.
+
+    This is your first step when exploring a database or before running queries.
+    Always call this before inspect_table_schema or safe_read_query.
+
     Args:
         schema: Optional schema name to filter tables (default: all schemas)
-        
+
     Returns:
         Dictionary containing:
         - tables: List of table names
         - count: Number of tables
         - schema: Schema name or 'all'
         - database: Database name
+
+    Next Steps:
+        After discovering tables, use inspect_table_schema to understand table structure
+        before running any queries with safe_read_query.
     """
     try:
         if not db_service:
             initialize_database()
-        return get_tables(db_service, schema)
+
+        # Mark tables as discovered in session state
+        session = get_session_state()
+        session.mark_tables_discovered()
+
+        result = get_tables(db_service, schema)
+        logger.info(f"Discovered {result.get('count', 0)} tables in schema: {schema or 'all'}")
+
+        return result
     except MCPError as e:
-        logger.error(f"MCP error in list_tables: {e}")
+        logger.error(f"MCP error in discover_tables: {e}")
         return {
             'error': str(e),
             'recoverable': e.recoverable
         }
     except Exception as e:
-        logger.error(f"Unexpected error in list_tables: {e}")
+        logger.error(f"Unexpected error in discover_tables: {e}")
         return {
             'error': f"Unexpected error: {str(e)}",
             'recoverable': False
         }
 
 
-@mcp.tool()
+@mcp.tool(name="inspect_table_schema")
 async def describe_table(table_name: str, schema: Optional[str] = None) -> Dict[str, Any]:
-    """Get column information for a specific table.
-    
+    """📋 STEP 2: Inspect table structure - REQUIRED before safe_read_query.
+
+    Gets column names, types, constraints, and relationships for a table.
+    You MUST call this for EVERY table before using safe_read_query.
+
+    Prerequisites:
+        - Call discover_tables first to see available tables
+
     Args:
-        table_name: Name of the table to describe
+        table_name: Name of the table to inspect
         schema: Optional schema name (default: public)
-        
+
     Returns:
         Dictionary containing:
         - table_name: Name of the table
         - schema: Schema name
-        - columns: List of column details
+        - columns: List of column details (name, type, nullable, default)
         - column_count: Number of columns
+        - constraints: Primary keys, foreign keys, etc.
+
+    ⚠️ IMPORTANT:
+        safe_read_query will FAIL if you haven't inspected the table structure first.
+        This ensures you understand the data before querying it.
+
+    Next Steps:
+        After inspecting table schema, you can safely use safe_read_query
+        to execute SQL queries on this table.
     """
     try:
         if not db_service:
             initialize_database()
-        return get_columns(db_service, table_name, schema)
+
+        # Get table schema
+        result = get_columns(db_service, table_name, schema)
+
+        # Track this table as inspected in session state
+        session = get_session_state()
+        session.add_inspected_table(table_name)
+
+        logger.info(f"Inspected table schema: {table_name} ({result.get('column_count', 0)} columns)")
+        return result
+
     except InvalidTableError as e:
-        logger.error(f"Invalid table error in describe_table: {e}")
+        logger.error(f"Invalid table error in inspect_table_schema: {e}")
         return {
             'error': str(e),
             'table_name': e.table_name,
-            'recoverable': e.recoverable
+            'recoverable': e.recoverable,
+            'suggestion': 'Use discover_tables to see available tables'
         }
     except MCPError as e:
-        logger.error(f"MCP error in describe_table: {e}")
+        logger.error(f"MCP error in inspect_table_schema: {e}")
         return {
             'error': str(e),
             'recoverable': e.recoverable
         }
     except Exception as e:
-        logger.error(f"Unexpected error in describe_table: {e}")
+        logger.error(f"Unexpected error in inspect_table_schema: {e}")
         return {
             'error': f"Unexpected error: {str(e)}",
             'recoverable': False
@@ -589,6 +632,78 @@ async def get_dependencies(object_name: str,
             'recoverable': False
         }
 
+@mcp.tool(name="safe_read_query")
+async def execute_sql_query(query: str, limit: Optional[int] = None) -> Dict[str, Any]:
+    """⚡ STEP 3: Execute READ-ONLY SQL queries - REQUIRES table schema inspection first.
+
+    Executes safe SELECT and EXPLAIN queries with validation and safety constraints.
+    This tool will FAIL if you haven't called inspect_table_schema for ALL tables in your query.
+
+    Prerequisites:
+        1. Call discover_tables to see available tables
+        2. Call inspect_table_schema for EVERY table you want to query
+        3. ONLY THEN use this tool to execute your SQL query
+
+    Args:
+        query: SQL query to execute (SELECT, EXPLAIN only)
+        limit: Optional result limit (default: 100, max: 1000)
+
+    Returns:
+        Dictionary containing:
+        - data: Query results
+        - row_count: Number of rows returned
+        - execution_time_ms: Query execution time
+        - query: Executed query (possibly modified with LIMIT)
+
+    ⚠️ VALIDATION ERRORS:
+        - "Table structure unknown" → Call inspect_table_schema for missing tables
+        - "SQL parsing error" → Check your SQL syntax
+        - "Unsafe operation" → Only SELECT and EXPLAIN queries allowed
+
+    Example Workflow:
+        1. discover_tables() → Find available tables
+        2. inspect_table_schema('users') → Understand table structure
+        3. safe_read_query('SELECT * FROM users LIMIT 10') → Execute query
+    """
+    if not db_service:
+        return {
+            'error': 'Database service not initialized',
+            'recoverable': False
+        }
+
+    try:
+        # Extract table names from the query
+        table_names = extract_table_names_from_query(query)
+        logger.debug(f"Query references tables: {sorted(table_names)}")
+
+        # Check session state for prerequisite validation
+        session = get_session_state()
+        validation_error = session.validate_query_prerequisites(table_names)
+
+        if validation_error:
+            logger.warning(f"Query validation failed for tables: {sorted(table_names)}")
+            return validation_error
+
+        # Execute the query
+        result = execute_query(db_service, query, limit)
+        logger.info(f"Successfully executed query on {len(table_names)} table(s), "
+                   f"returned {result.get('row_count', 0)} rows")
+        return result
+
+    except MCPError as e:
+        logger.error(f"MCP error executing query: {e.message}")
+        return {
+            'error': e.message,
+            'recoverable': e.recoverable,
+            'suggestion': 'Check your SQL syntax and table names'
+        }
+    except Exception as e:
+        logger.error(f"Unexpected error executing query: {str(e)}")
+        return {
+            'error': f"Unexpected error: {str(e)}",
+            'recoverable': False,
+            'suggestion': 'Verify table names with discover_tables and inspect_table_schema'
+        }
 
 def run_health_api(health_api: HealthAPI):
     """Run health API in a separate thread.

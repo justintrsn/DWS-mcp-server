@@ -96,12 +96,12 @@ class TestServerEndpoints:
                 assert tools.tools
 
                 tool_names = [tool.name for tool in tools.tools]
-                assert 'list_tables' in tool_names
-                assert 'describe_table' in tool_names
+                assert 'discover_tables' in tool_names
+                assert 'inspect_table_schema' in tool_names
                 assert 'table_statistics' in tool_names
 
-                # Test list_tables tool
-                result = await session.call_tool("list_tables", {})
+                # Test discover_tables tool
+                result = await session.call_tool("discover_tables", {})
                 assert result.content
 
                 # Parse the result
@@ -151,7 +151,7 @@ class TestServerEndpoints:
                 await session.initialize()
 
                 # Test invalid table name
-                result = await session.call_tool("describe_table", {
+                result = await session.call_tool("inspect_table_schema", {
                     "table_name": "nonexistent_table_xyz"
                 })
 

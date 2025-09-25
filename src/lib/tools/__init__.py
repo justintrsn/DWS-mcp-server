@@ -40,6 +40,11 @@ from .objects import (
     analyze_object_dependencies
 )
 
+# Query execution tools
+from .query import (
+    execute_query
+)
+
 __all__ = [
     # Database tools
     'get_database_stats',
@@ -58,5 +63,7 @@ __all__ = [
     'enumerate_functions',
     'enumerate_indexes',
     'fetch_table_constraints',
-    'analyze_object_dependencies'
+    'analyze_object_dependencies',
+    # Query tools
+    'execute_query'
 ]

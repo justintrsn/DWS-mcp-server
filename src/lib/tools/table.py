@@ -5,11 +5,49 @@ providing table listing, column information, and statistics.
 """
 
 from typing import Dict, Any, Optional, List, Union
+import re
 from src.lib.logging_config import get_logger
 from src.models.error_types import MCPError, InvalidTableError
 from src.services.database_service import DatabaseService
 
 logger = get_logger(__name__)
+
+
+def _validate_identifier(identifier: str) -> None:
+    """Validate table/schema identifier for SQL injection attempts.
+
+    Args:
+        identifier: The identifier to validate
+
+    Raises:
+        InvalidTableError: If identifier contains invalid patterns
+    """
+    if not identifier:
+        raise InvalidTableError(identifier, "Identifier cannot be empty")
+
+    # Check for dangerous patterns that could indicate SQL injection
+    dangerous_patterns = [
+        r';',  # Statement separator
+        r'--',  # SQL comment
+        r'/\*',  # Multi-line comment start
+        r'\*/',  # Multi-line comment end
+        r"'",  # Single quotes
+        r'"',  # Double quotes (except for valid identifiers)
+        r'\bDROP\b',  # DROP statements
+        r'\bDELETE\b',  # DELETE statements
+        r'\bUPDATE\b',  # UPDATE statements
+        r'\bINSERT\b',  # INSERT statements
+        r'\bUNION\b',  # UNION statements
+        r'\bOR\b.*=.*=',  # OR 1=1 type injections
+    ]
+
+    identifier_upper = identifier.upper()
+    for pattern in dangerous_patterns:
+        if re.search(pattern, identifier_upper, re.IGNORECASE):
+            raise InvalidTableError(
+                identifier,
+                f"Invalid identifier - not allowed pattern detected: {identifier}"
+            )
 
 
 def get_tables(db_service: DatabaseService, schema: Optional[str] = None) -> Dict[str, Any]:
@@ -129,6 +167,10 @@ def get_columns(db_service: DatabaseService,
     """
     if not schema:
         schema = 'public'
+
+    # Validate inputs for SQL injection attempts
+    _validate_identifier(table_name)
+    _validate_identifier(schema)
 
     # Enhanced query with foreign keys, comments, and constraints
     query = """

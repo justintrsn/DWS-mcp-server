@@ -303,12 +303,25 @@ class QueryScenarioRunner(BaseTestMCP):
 
             print(f"   🔧 Calling tool: {tool_name}")
 
+            # Enhanced debug output for tool arguments
+            if tool_args:
+                args_preview = json.dumps(tool_args, indent=2)[:200]
+                if len(args_preview) > 200:
+                    args_preview += "..."
+                print(f"      📋 Arguments: {args_preview}")
+
             try:
                 # Call the tool (this will respect our limits)
                 result = await self.call_tool(tool_name, tool_args)
 
                 # Convert result to string for LLM
                 tool_result = json.dumps(result, indent=2) if result else "No result"
+
+                # Enhanced debug output for tool results
+                result_preview = tool_result[:300]
+                if len(tool_result) > 300:
+                    result_preview += "...(truncated for display)"
+                print(f"      ✅ Result preview: {result_preview}")
 
                 # Limit result size
                 if len(tool_result) > 2000:
@@ -384,6 +397,14 @@ class QueryScenarioRunner(BaseTestMCP):
             tool_score >= 0.5 and  # At least 50% of expected tools used
             entity_score >= 0.3    # At least 30% of expected entities mentioned
         )
+
+        # Show tool call summary
+        if result.tool_calls_made:
+            tools_used = [call["tool"] for call in result.tool_calls_made]
+            unique_tools = list(set(tools_used))
+            print(f"   🔧 Tools actually called: {', '.join(unique_tools)}")
+        else:
+            print(f"   ⚠️  No tools were called!")
 
         print(f"   📊 Validation: Tools {len(result.expected_tools_found)}/{len(expected_tools)}, "
               f"Entities {len(result.expected_entities_found)}/{len(expected_entities)}, "

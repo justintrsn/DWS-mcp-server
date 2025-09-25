@@ -158,3 +158,81 @@ query_scenarios:
     validation:
       require_foreign_keys: true
       require_primary_keys: true
+
+  # Phase 4 Data Query Scenarios - Real data retrieval with schema exploration
+  anime_data_queries:
+    description: "Query anime data with proper schema exploration first"
+    max_tool_calls: 8
+    timeout_seconds: 45
+    queries:
+      - "I want to know the top 3 anime that aired in 2022. Can you help me find this information?"
+      - "What are the highest rated anime in the database?"
+      - "Show me all anime with excellent ratings - those scoring above 8.5."
+    expected_tools: ["list_tables", "describe_table", "execute_sql_query"]
+    expected_entities: ["score", "title", "SQL", "aired_from", "2022"]
+    validation:
+      require_data_results: true
+      require_ranking: true
+      expect_anime_titles: true
+      require_schema_exploration: true
+
+  studio_data_analysis:
+    description: "Analyze studio data with schema-aware exploration"
+    max_tool_calls: 7
+    timeout_seconds: 40
+    queries:
+      - "Which studios have produced the most anime? I'd like to understand the relationship between studios and anime."
+      - "Can you show me the top studios by anime production count with their details?"
+      - "I'm interested in studios that have produced high-quality anime. What can you find?"
+    expected_tools: ["list_tables", "describe_table", "get_table_constraints", "execute_sql_query"]
+    expected_entities: ["studio", "count", "name", "founded_year", "JOIN"]
+    validation:
+      require_aggregation: true
+      require_studio_counts: true
+      require_relationship_understanding: true
+
+  temporal_data_queries:
+    description: "Query anime data by time periods"
+    max_tool_calls: 4
+    timeout_seconds: 35
+    queries:
+      - "Execute a SQL query to show anime distribution by release year. Use EXTRACT(YEAR FROM aired_from) to group by year and count anime."
+      - "Run a SQL query to get anime count by year with years sorted ascending."
+      - "Use SQL to find the highest scored anime from each year where aired_from is not null."
+    expected_tools: ["execute_sql_query"]
+    expected_entities: ["EXTRACT", "aired_from", "GROUP BY", "COUNT"]
+    validation:
+      require_temporal_grouping: true
+      require_year_data: true
+
+  advanced_data_insights:
+    description: "Complex analysis with error recovery and schema exploration"
+    max_tool_calls: 10
+    timeout_seconds: 60
+    queries:
+      - "I want to understand which studios produced the highest rated anime. Can you analyze this relationship including when these anime first aired?"
+      - "Find anime that are both highly rated and popular. What makes them special?"
+      - "Give me a comprehensive analysis of anime ratings and popularity patterns in the database."
+    expected_tools: ["discover_tables", "inspect_table_schema", "get_table_constraints", "safe_read_query", "column_statistics"]
+    expected_entities: ["JOIN", "score", "popularity", "ranked", "statistics", "studio_id", "aired_from"]
+    validation:
+      require_joins: true
+      require_complex_filtering: true
+      require_statistical_analysis: true
+      require_schema_exploration: true
+      expect_error_recovery: true
+
+  # New scenario specifically for testing multi-round error recovery
+  schema_exploration_with_errors:
+    description: "Test error recovery through schema exploration"
+    max_tool_calls: 8
+    timeout_seconds: 45
+    queries:
+      - "Show me the top anime by their ranking. I think there might be a 'rank' column."
+      - "Get studio details with their ID information. I assume the ID column is called 'id'."
+    expected_tools: ["describe_table", "execute_sql_query"]
+    expected_entities: ["ranked", "studio_id", "column", "error", "retry"]
+    validation:
+      expect_sql_errors: true
+      require_error_recovery: true
+      require_column_name_correction: true

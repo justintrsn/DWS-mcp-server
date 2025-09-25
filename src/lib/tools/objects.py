@@ -5,7 +5,7 @@ from typing import Dict, List, Any, Optional
 import json
 from src.services.database_service import DatabaseService
 from src.models.error_types import MCPError
-from src.utils.logger import get_logger, log_database_query
+from src.lib.logging_config import get_logger
 
 logger = get_logger(__name__)
 

@@ -42,7 +42,7 @@ class TestErrorHandling:
     
     def test_invalid_table_name_error(self, db_service):
         """Test error handling for invalid table names."""
-        from lib.mcp_tools import get_columns
+        from src.lib.tools.table import get_columns
         from src.models.error_types import InvalidTableError
         
         with pytest.raises(InvalidTableError) as exc_info:
@@ -56,7 +56,7 @@ class TestErrorHandling:
     
     def test_sql_injection_prevention(self, db_service):
         """Test that SQL injection attempts are blocked."""
-        from lib.mcp_tools import get_columns
+        from src.lib.tools.table import get_columns
         from src.models.error_types import InvalidTableError, MCPError
         
         # Various SQL injection attempts
@@ -105,7 +105,7 @@ class TestErrorHandling:
     
     def test_invalid_schema_name(self, db_service):
         """Test error handling for invalid schema names - returns empty list."""
-        from lib.mcp_tools import get_tables
+        from src.lib.tools.table import get_tables
 
         # Non-existent schema should return empty list, not error
         result = get_tables(db_service=db_service, schema='nonexistent_schema_12345')
@@ -155,7 +155,7 @@ class TestErrorHandling:
     
     def test_error_response_format(self, db_service):
         """Test that errors follow MCP error response format."""
-        from lib.mcp_tools import get_columns
+        from src.lib.tools.table import get_columns
         from src.models.error_types import InvalidTableError
         
         try:

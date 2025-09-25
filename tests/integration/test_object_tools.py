@@ -12,7 +12,30 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../src'))
 
 from src.services.database_service import DatabaseService
 from src.models.error_types import MCPError, InvalidTableError
-from src.utils.logger import get_logger
+from src.lib.logging_config import get_logger
+
+# Import the specific tools from their modules with correct names
+from src.lib.tools.objects import (
+    inspect_database_object as describe_object,
+    analyze_query_plan as explain_query,
+    enumerate_views as list_views,
+    enumerate_functions as list_functions,
+    enumerate_indexes as list_indexes,
+    fetch_table_constraints as get_table_constraints,
+    analyze_object_dependencies as get_dependencies
+)
+
+# Create a mock mcp_tools module for backward compatibility
+class MockMCPTools:
+    describe_object = describe_object
+    get_table_constraints = get_table_constraints
+    get_dependencies = get_dependencies
+    list_views = list_views
+    list_functions = list_functions
+    list_indexes = list_indexes
+    explain_query = explain_query
+
+mcp_tools = MockMCPTools()
 
 logger = get_logger(__name__)
 
@@ -25,7 +48,6 @@ class TestDescribeObject:
 
     def test_describe_object_table(self):
         """Test describing a table object."""
-        from src.lib import mcp_tools
 
         # Mock database service
         db_service = Mock(spec=DatabaseService)
@@ -43,7 +65,7 @@ class TestDescribeObject:
             'row_count': 100
         }]
 
-        result = mcp_tools.describe_object(
+        result = describe_object(
             db_service=db_service,
             object_name='users',
             schema='public'
@@ -57,7 +79,6 @@ class TestDescribeObject:
 
     def test_describe_object_view(self):
         """Test describing a view object."""
-        from src.lib import mcp_tools
 
         db_service = Mock(spec=DatabaseService)
         db_service.config = {"database": "test_db"}
@@ -72,7 +93,7 @@ class TestDescribeObject:
             'description': 'View of active users'
         }]
 
-        result = mcp_tools.describe_object(
+        result = describe_object(
             db_service=db_service,
             object_name='active_users',
             object_type='view',
@@ -85,14 +106,13 @@ class TestDescribeObject:
 
     def test_describe_object_not_found(self):
         """Test describing non-existent object."""
-        from src.lib import mcp_tools
 
         db_service = Mock(spec=DatabaseService)
         db_service.config = {"database": "test_db"}
         db_service.execute_readonly_query.return_value = []
 
         with pytest.raises(MCPError) as exc_info:
-            mcp_tools.describe_object(
+            describe_object(
                 db_service=db_service,
                 object_name='nonexistent',
                 schema='public'
@@ -106,7 +126,6 @@ class TestExplainQuery:
 
     def test_explain_query_basic(self):
         """Test basic query explanation."""
-        from src.lib import mcp_tools
 
         db_service = Mock(spec=DatabaseService)
         db_service.config = {"database": "test_db"}
@@ -123,7 +142,7 @@ class TestExplainQuery:
             }
         }]
 
-        result = mcp_tools.explain_query(
+        result = explain_query(
             db_service=db_service,
             query='SELECT * FROM users',
             analyze=False
@@ -136,7 +155,6 @@ class TestExplainQuery:
 
     def test_explain_query_with_analyze(self):
         """Test query explanation with ANALYZE."""
-        from src.lib import mcp_tools
 
         db_service = Mock(spec=DatabaseService)
         db_service.config = {"database": "test_db"}
@@ -157,7 +175,7 @@ class TestExplainQuery:
             }
         }]
 
-        result = mcp_tools.explain_query(
+        result = explain_query(
             db_service=db_service,
             query='SELECT * FROM users WHERE id = 1',
             analyze=True
@@ -169,14 +187,13 @@ class TestExplainQuery:
 
     def test_explain_query_invalid_sql(self):
         """Test EXPLAIN with invalid SQL."""
-        from src.lib import mcp_tools
 
         db_service = Mock(spec=DatabaseService)
         db_service.config = {"database": "test_db"}
         db_service.execute_readonly_query.side_effect = MCPError("SQL syntax error")
 
         with pytest.raises(MCPError) as exc_info:
-            mcp_tools.explain_query(
+            explain_query(
                 db_service=db_service,
                 query='INVALID SQL HERE'
             )
@@ -189,7 +206,6 @@ class TestListViews:
 
     def test_list_views_basic(self):
         """Test listing views in a schema."""
-        from src.lib import mcp_tools
 
         db_service = Mock(spec=DatabaseService)
         db_service.config = {"database": "test_db"}
@@ -209,7 +225,7 @@ class TestListViews:
             }
         ]
 
-        result = mcp_tools.list_views(
+        result = list_views(
             db_service=db_service,
             schema='public'
         )
@@ -221,7 +237,6 @@ class TestListViews:
 
     def test_list_views_with_definition(self):
         """Test listing views with definitions."""
-        from src.lib import mcp_tools
 
         db_service = Mock(spec=DatabaseService)
         db_service.config = {"database": "test_db"}
@@ -236,7 +251,7 @@ class TestListViews:
             }
         ]
 
-        result = mcp_tools.list_views(
+        result = list_views(
             db_service=db_service,
             schema='public',
             include_definition=True
@@ -251,7 +266,6 @@ class TestListFunctions:
 
     def test_list_functions_basic(self):
         """Test listing functions in a schema."""
-        from src.lib import mcp_tools
 
         db_service = Mock(spec=DatabaseService)
         db_service.config = {"database": "test_db"}
@@ -275,7 +289,7 @@ class TestListFunctions:
             }
         ]
 
-        result = mcp_tools.list_functions(
+        result = list_functions(
             db_service=db_service,
             schema='public'
         )
@@ -287,7 +301,6 @@ class TestListFunctions:
 
     def test_list_functions_exclude_system(self):
         """Test excluding system functions."""
-        from src.lib import mcp_tools
 
         db_service = Mock(spec=DatabaseService)
         db_service.config = {"database": "test_db"}
@@ -303,7 +316,7 @@ class TestListFunctions:
             }
         ]
 
-        result = mcp_tools.list_functions(
+        result = list_functions(
             db_service=db_service,
             schema='public',
             include_system=False
@@ -318,7 +331,6 @@ class TestListIndexes:
 
     def test_list_indexes_all(self):
         """Test listing all indexes."""
-        from src.lib import mcp_tools
 
         db_service = Mock(spec=DatabaseService)
         db_service.config = {"database": "test_db"}
@@ -346,7 +358,7 @@ class TestListIndexes:
             }
         ]
 
-        result = mcp_tools.list_indexes(
+        result = list_indexes(
             db_service=db_service,
             schema='public'
         )
@@ -358,7 +370,6 @@ class TestListIndexes:
 
     def test_list_indexes_for_table(self):
         """Test listing indexes for specific table."""
-        from src.lib import mcp_tools
 
         db_service = Mock(spec=DatabaseService)
         db_service.config = {"database": "test_db"}
@@ -376,7 +387,7 @@ class TestListIndexes:
             }
         ]
 
-        result = mcp_tools.list_indexes(
+        result = list_indexes(
             db_service=db_service,
             table_name='products',
             schema='public'
@@ -387,7 +398,6 @@ class TestListIndexes:
 
     def test_list_indexes_detect_unused(self):
         """Test detection of unused indexes."""
-        from src.lib import mcp_tools
 
         db_service = Mock(spec=DatabaseService)
         db_service.config = {"database": "test_db"}
@@ -405,7 +415,7 @@ class TestListIndexes:
             }
         ]
 
-        result = mcp_tools.list_indexes(
+        result = list_indexes(
             db_service=db_service,
             schema='public',
             include_unused=True
@@ -420,7 +430,6 @@ class TestGetTableConstraints:
 
     def test_get_table_constraints_all_types(self):
         """Test getting all constraint types for a table."""
-        from src.lib import mcp_tools
 
         db_service = Mock(spec=DatabaseService)
         db_service.config = {"database": "test_db"}
@@ -458,7 +467,7 @@ class TestGetTableConstraints:
             }
         ]
 
-        result = mcp_tools.get_table_constraints(
+        result = get_table_constraints(
             db_service=db_service,
             table_name='users',
             schema='public'
@@ -481,13 +490,12 @@ class TestGetTableConstraints:
 
     def test_get_table_constraints_no_constraints(self):
         """Test table with no constraints."""
-        from src.lib import mcp_tools
 
         db_service = Mock(spec=DatabaseService)
         db_service.config = {"database": "test_db"}
         db_service.execute_readonly_query.return_value = []
 
-        result = mcp_tools.get_table_constraints(
+        result = get_table_constraints(
             db_service=db_service,
             table_name='temp_table',
             schema='public'
@@ -502,7 +510,6 @@ class TestGetDependencies:
 
     def test_get_dependencies_depends_on(self):
         """Test finding what an object depends on."""
-        from src.lib import mcp_tools
 
         db_service = Mock(spec=DatabaseService)
         db_service.config = {"database": "test_db"}
@@ -524,7 +531,7 @@ class TestGetDependencies:
             }
         ]
 
-        result = mcp_tools.get_dependencies(
+        result = get_dependencies(
             db_service=db_service,
             object_name='user_stats_view',
             schema='public',
@@ -538,7 +545,6 @@ class TestGetDependencies:
 
     def test_get_dependencies_dependents(self):
         """Test finding what depends on an object."""
-        from src.lib import mcp_tools
 
         db_service = Mock(spec=DatabaseService)
         db_service.config = {"database": "test_db"}
@@ -560,7 +566,7 @@ class TestGetDependencies:
             }
         ]
 
-        result = mcp_tools.get_dependencies(
+        result = get_dependencies(
             db_service=db_service,
             object_name='users',
             schema='public',
@@ -573,7 +579,6 @@ class TestGetDependencies:
 
     def test_get_dependencies_both_directions(self):
         """Test finding dependencies in both directions."""
-        from src.lib import mcp_tools
 
         db_service = Mock(spec=DatabaseService)
         db_service.config = {"database": "test_db"}
@@ -586,7 +591,7 @@ class TestGetDependencies:
             [{'dependent_object': 'view2', 'depends_on_object': 'view1', 'dependent_type': 'view', 'dependency_type': 'normal'}]
         ]
 
-        result = mcp_tools.get_dependencies(
+        result = get_dependencies(
             db_service=db_service,
             object_name='view1',
             schema='public',

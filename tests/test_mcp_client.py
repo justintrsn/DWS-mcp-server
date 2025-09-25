@@ -17,7 +17,7 @@ from typing import Optional, List, Dict, Any
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from client.base_test_mcp import BaseTestMCP, TestResult, TestStatus
-from client.tool_testers import DatabaseToolTester, SchemaToolTester, TableToolTester, ObjectToolTester
+from client.tool_testers import DatabaseToolTester, SchemaToolTester, TableToolTester, ObjectToolTester, QueryToolTester
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
 
@@ -30,7 +30,7 @@ class TestMCPRunner(BaseTestMCP):
     """Main test runner that orchestrates all tool category tests"""
 
     def __init__(self, transport: str = "sse", port: int = 3000):
-        super().__init__(transport, port)
+        super().__init__(transport, port, max_tool_calls=50)  # Increase limit for full test suite
 
         # Load configuration from environment for OpenAI integration
         self.api_key = os.getenv("OPENAI_API_KEY")
@@ -53,6 +53,7 @@ class TestMCPRunner(BaseTestMCP):
         self.schema_tester = SchemaToolTester(transport, port)
         self.table_tester = TableToolTester(transport, port)
         self.object_tester = ObjectToolTester(transport, port)
+        self.query_tester = QueryToolTester(transport, port)
 
     async def connect_all_testers(self) -> bool:
         """Connect all tool testers to the MCP server"""
@@ -72,13 +73,17 @@ class TestMCPRunner(BaseTestMCP):
             print(f"   - {tool['name']}: {desc}")
 
         # Connect all testers by sharing connection details
-        for tester in [self.database_tester, self.schema_tester, self.table_tester, self.object_tester]:
+        for tester in [self.database_tester, self.schema_tester, self.table_tester, self.object_tester, self.query_tester]:
             # Share the connection from main runner
             tester.session = self.session
             tester.connected = self.connected
             tester.available_tools = self.available_tools
             tester._streams_context = self._streams_context
             tester._session_context = self._session_context
+            # Share tool call limits and point to shared counter
+            tester.max_tool_calls = self.max_tool_calls
+            # Make all testers share the same counter by referencing main runner
+            tester._shared_runner = self
 
         return True
 
@@ -171,7 +176,7 @@ class TestMCPRunner(BaseTestMCP):
         print("\n🧪 Test: OpenAI Integration")
         print("-" * 40)
 
-        query = "What tables are available in the database?"
+        query = "What are the top 5 2020 anime by score?"
         print(f"Query: {query}")
 
         try:
@@ -187,6 +192,55 @@ class TestMCPRunner(BaseTestMCP):
             print(f"❌ Failed: {e}")
             return TestResult(
                 name="openai_integration",
+                status=TestStatus.ERROR,
+                message=str(e)
+            )
+
+    async def test_scenario_integration(self) -> TestResult:
+        """Test scenario-based integration using YAML scenarios"""
+        if not self.openai:
+            print("\n🧪 Test: Scenario Integration (SKIPPED - No API key)")
+            return TestResult(
+                name="scenario_integration",
+                status=TestStatus.SKIPPED,
+                message="No OpenAI API key provided"
+            )
+
+        print("\n🧪 Test: Scenario Integration (YAML-based)")
+        print("-" * 40)
+
+        try:
+            # Import and run the anime_data_queries scenario
+            from client.query_scenario_runner import QueryScenarioRunner
+
+            scenario_runner = QueryScenarioRunner(self.transport, self.port)
+            scenario_runner.session = self.session
+            scenario_runner.connected = self.connected
+            scenario_runner.available_tools = self.available_tools
+            scenario_runner.setup_openai_client(self.api_key)
+
+            # Run the anime_data_queries scenario
+            result = await scenario_runner.run_scenario("advanced_data_insights")
+
+            print(f"📊 Scenario Result: {result.status.value}")
+            print(f"⏱️  Duration: {result.duration_seconds:.1f}s")
+            print(f"🔧 Tool calls: {result.total_tool_calls}")
+
+            if result.tool_calls_made:
+                tools_used = [call["tool"] for call in result.tool_calls_made]
+                unique_tools = list(set(tools_used))
+                print(f"🛠️  Tools used: {', '.join(unique_tools)}")
+
+            return TestResult(
+                name="scenario_integration",
+                status=TestStatus.PASSED if result.status.value == "passed" else TestStatus.FAILED,
+                message=f"Scenario {result.status.value}: {result.message}"
+            )
+
+        except Exception as e:
+            print(f"❌ Failed: {e}")
+            return TestResult(
+                name="scenario_integration",
                 status=TestStatus.ERROR,
                 message=str(e)
             )
@@ -326,13 +380,18 @@ class TestMCPRunner(BaseTestMCP):
         object_results = await self.object_tester.run_all_tests()
         all_results.extend(object_results)
 
+        print("\n📋 Running Query Execution Tests...")
+        query_results = await self.query_tester.run_all_tests()
+        all_results.extend(query_results)
+
         # Run infrastructure tests
         print("\n📋 Running Infrastructure Tests...")
         health_result = await self.test_health_endpoint()
         all_results.append(health_result)
 
-        openai_result = await self.test_openai_integration()
-        all_results.append(openai_result)
+        # Use scenario integration instead of hardcoded OpenAI test
+        scenario_result = await self.test_scenario_integration()
+        all_results.append(scenario_result)
 
         # Summary
         passed = sum(1 for r in all_results if r.status == TestStatus.PASSED)

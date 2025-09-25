@@ -182,13 +182,24 @@ class BaseTestMCP:
         if not self.connected or not self.session:
             raise RuntimeError("Not connected to MCP server")
 
-        # Check tool call limit
-        if self.tool_call_count >= self.max_tool_calls:
-            self.tool_call_limit_exceeded = True
-            raise RuntimeError(f"Tool call limit exceeded ({self.max_tool_calls} calls). Preventing infinite loops.")
+        # Use shared runner's counter if available, otherwise use own counter
+        if hasattr(self, '_shared_runner') and self._shared_runner:
+            current_count = self._shared_runner.tool_call_count
+            max_calls = self._shared_runner.max_tool_calls
+        else:
+            current_count = self.tool_call_count
+            max_calls = self.max_tool_calls
 
-        # Track tool call
-        self.tool_call_count += 1
+        # Check tool call limit
+        if current_count >= max_calls:
+            self.tool_call_limit_exceeded = True
+            raise RuntimeError(f"Tool call limit exceeded ({max_calls} calls). Preventing infinite loops.")
+
+        # Track tool call (update shared runner if available)
+        if hasattr(self, '_shared_runner') and self._shared_runner:
+            self._shared_runner.tool_call_count += 1
+        else:
+            self.tool_call_count += 1
         self.tool_call_history.append((tool_name, params or {}))
 
         try:

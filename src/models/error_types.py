@@ -19,8 +19,18 @@ class InvalidTableError(MCPError):
         self.table_name = table_name
 
 
+class InvalidQueryError(MCPError):
+    """Error raised when a query is unsafe or invalid for execution."""
+
+    def __init__(self, query: str, reason: str):
+        message = f"Invalid query: {reason}. Query: {query[:100]}{'...' if len(query) > 100 else ''}"
+        super().__init__(message, recoverable=False)
+        self.query = query
+        self.reason = reason
+
+
 class ConnectionError(MCPError):
     """Error raised when database connection fails."""
-    
+
     def __init__(self, message: str):
         super().__init__(message, recoverable=True)

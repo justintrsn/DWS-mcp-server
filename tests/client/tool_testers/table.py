@@ -1,8 +1,8 @@
 """Table Tool Tester
 
 Tests for table-level operations including:
-- list_tables: List all tables with metadata
-- describe_table: Get detailed table structure
+- discover_tables: List all tables with metadata
+- inspect_table_schema: Get detailed table structure
 - table_statistics: Get table statistics and activity metrics
 - column_statistics: Get column-level statistical analysis
 """
@@ -16,17 +16,17 @@ class TableToolTester(BaseTestMCP):
     def __init__(self, transport: str = "sse", port: int = 3000):
         super().__init__(transport, port)
 
-    async def test_list_tables(self) -> TestResult:
+    async def test_discover_tables(self) -> TestResult:
         """Test listing database tables"""
         print("\n🧪 Test: List Database Tables")
         print("-" * 40)
 
         try:
-            result = await self.call_tool("list_tables", {})
+            result = await self.call_tool("discover_tables", {})
 
             if 'error' in result:
                 return TestResult(
-                    name="list_tables",
+                    name="discover_tables",
                     status=TestStatus.FAILED,
                     message=f"Tool error: {result['error']}"
                 )
@@ -45,40 +45,40 @@ class TableToolTester(BaseTestMCP):
                         print(f"   - {table}")
 
             return TestResult(
-                name="list_tables",
+                name="discover_tables",
                 status=TestStatus.PASSED,
                 message=f"Listed {result.get('count', 0)} tables",
                 data=result,
-                tool_calls=["list_tables"]
+                tool_calls=["discover_tables"]
             )
 
         except Exception as e:
             print(f"❌ Failed: {e}")
             return TestResult(
-                name="list_tables",
+                name="discover_tables",
                 status=TestStatus.ERROR,
                 message=str(e)
             )
 
-    async def test_describe_table(self) -> TestResult:
+    async def test_inspect_table_schema(self) -> TestResult:
         """Test describing a table structure"""
         print("\n🧪 Test: Describe Table Structure")
         print("-" * 40)
 
         try:
             # First get list of tables from public schema to avoid system tables
-            list_result = await self.call_tool("list_tables", {"schema": "public"})
+            list_result = await self.call_tool("discover_tables", {"schema": "public"})
 
             tables = list_result.get('tables', [])
             if not tables:
                 # Try getting all tables if no public schema tables
                 print("   No tables in public schema, trying all schemas...")
-                list_result = await self.call_tool("list_tables", {})
+                list_result = await self.call_tool("discover_tables", {})
                 tables = list_result.get('tables', [])
 
                 if not tables:
                     return TestResult(
-                        name="describe_table",
+                        name="inspect_table_schema",
                         status=TestStatus.SKIPPED,
                         message="No tables found to describe"
                     )
@@ -110,13 +110,13 @@ class TableToolTester(BaseTestMCP):
 
             print(f"   Describing table: {table_name}")
 
-            result = await self.call_tool("describe_table", {
+            result = await self.call_tool("inspect_table_schema", {
                 "table_name": table_name
             })
 
             if 'error' in result:
                 return TestResult(
-                    name="describe_table",
+                    name="inspect_table_schema",
                     status=TestStatus.FAILED,
                     message=f"Tool error: {result['error']}"
                 )
@@ -152,17 +152,17 @@ class TableToolTester(BaseTestMCP):
                     print(f"   - {const.get('constraint_type')}: {const.get('constraint_name')}")
 
             return TestResult(
-                name="describe_table",
+                name="inspect_table_schema",
                 status=TestStatus.PASSED,
                 message=f"Described table {table_name} with {result.get('column_count', 0)} columns",
                 data=result,
-                tool_calls=["describe_table"]
+                tool_calls=["inspect_table_schema"]
             )
 
         except Exception as e:
             print(f"❌ Failed: {e}")
             return TestResult(
-                name="describe_table",
+                name="inspect_table_schema",
                 status=TestStatus.ERROR,
                 message=str(e)
             )
@@ -174,13 +174,13 @@ class TableToolTester(BaseTestMCP):
 
         try:
             # First get list of tables from public schema
-            list_result = await self.call_tool("list_tables", {"schema": "public"})
+            list_result = await self.call_tool("discover_tables", {"schema": "public"})
             tables = list_result.get('tables', [])
 
             if not tables:
                 # Try all schemas if no public tables
                 print("   No tables in public schema, trying all schemas...")
-                list_result = await self.call_tool("list_tables", {})
+                list_result = await self.call_tool("discover_tables", {})
                 tables = list_result.get('tables', [])
 
                 if not tables:
@@ -273,7 +273,7 @@ class TableToolTester(BaseTestMCP):
 
         try:
             # Find the anime table first
-            result = await self.call_tool("list_tables", {"schema": "public"})
+            result = await self.call_tool("discover_tables", {"schema": "public"})
             tables = result.get('tables', [])
 
             anime_table = None
@@ -362,10 +362,10 @@ class TableToolTester(BaseTestMCP):
         results = []
 
         # Test list tables
-        results.append(await self.test_list_tables())
+        results.append(await self.test_discover_tables())
 
         # Test describe table
-        results.append(await self.test_describe_table())
+        results.append(await self.test_inspect_table_schema())
 
         # Test table statistics
         results.append(await self.test_table_statistics())

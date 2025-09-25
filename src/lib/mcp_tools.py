@@ -33,7 +33,9 @@ from .tools import (
     enumerate_functions,
     enumerate_indexes,
     fetch_table_constraints,
-    analyze_object_dependencies
+    analyze_object_dependencies,
+    # Query execution tools
+    execute_query
 )
 
 # Re-export all tools for backward compatibility
@@ -55,7 +57,9 @@ __all__ = [
     'enumerate_functions',
     'enumerate_indexes',
     'fetch_table_constraints',
-    'analyze_object_dependencies'
+    'analyze_object_dependencies',
+    # Query tools
+    'execute_query'
 ]
 
 # Optional: Add convenience functions or orchestration logic here

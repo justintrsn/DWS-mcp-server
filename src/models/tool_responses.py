@@ -5,7 +5,7 @@ type safety, validation, and consistent API responses.
 """
 
 from typing import Dict, List, Optional, Literal
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
 # ============================================================================
@@ -24,8 +24,8 @@ class SchemaInfo(BaseModel):
     size_bytes: Optional[int] = Field(None, ge=0, description="Total size in bytes")
     size_pretty: Optional[str] = Field(None, description="Human-readable size")
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "schema_name": "public",
                 "schema_owner": "pg_database_owner",
@@ -35,6 +35,7 @@ class SchemaInfo(BaseModel):
                 "size_pretty": "1 MB"
             }
         }
+    )
 
 
 class SchemasListResponse(BaseModel):
@@ -44,8 +45,8 @@ class SchemasListResponse(BaseModel):
     count: int = Field(..., ge=0, description="Total number of schemas")
     schemas: List[SchemaInfo] = Field(..., description="List of schema information")
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "database": "test_footfall",
                 "count": 2,
@@ -59,6 +60,7 @@ class SchemasListResponse(BaseModel):
                 ]
             }
         }
+    )
 
 
 # ============================================================================
@@ -77,7 +79,8 @@ class DatabaseStatistics(BaseModel):
     temp_bytes: int = Field(..., ge=0, description="Total bytes written to temp files")
     deadlocks: int = Field(..., ge=0, description="Number of deadlocks detected")
 
-    @validator('cache_hit_ratio')
+    @field_validator('cache_hit_ratio')
+    @classmethod
     def validate_percentage(cls, v):
         """Ensure cache hit ratio is a valid percentage."""
         if not 0 <= v <= 100:
@@ -99,15 +102,16 @@ class DatabaseStatsResponse(BaseModel):
     uptime: Optional[str] = Field(None, description="Server uptime in human-readable format")
     statistics: DatabaseStatistics = Field(..., description="Performance statistics")
 
-    @validator('connection_limit')
+    @field_validator('connection_limit')
+    @classmethod
     def validate_connection_limit(cls, v):
         """Connection limit must be -1 (unlimited) or positive."""
         if v != -1 and v < 0:
             raise ValueError('connection_limit must be -1 or positive')
         return v
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "database_name": "test_footfall",
                 "size_bytes": 7934767,
@@ -129,6 +133,7 @@ class DatabaseStatsResponse(BaseModel):
                 }
             }
         }
+    )
 
 
 # ============================================================================
@@ -171,23 +176,26 @@ class ConnectionInfoResponse(BaseModel):
     )
     warnings: Optional[List[str]] = Field(None, description="Connection-related warnings")
 
-    @validator('connection_usage_percent')
+    @field_validator('connection_usage_percent')
+    @classmethod
     def validate_usage_percent(cls, v):
         """Ensure usage percentage is valid."""
         if v is not None and not 0 <= v <= 100:
             raise ValueError('connection_usage_percent must be between 0 and 100')
         return round(v, 2) if v is not None else v
 
-    @validator('current_connections')
-    def validate_current_vs_max(cls, v, values):
+    @field_validator('current_connections')
+    @classmethod
+    def validate_current_vs_max(cls, v, info):
         """Ensure current connections don't exceed max."""
-        max_conn = values.get('max_connections')
-        if max_conn and v > max_conn:
-            raise ValueError(f'current_connections ({v}) cannot exceed max_connections ({max_conn})')
+        if hasattr(info, 'data') and info.data:
+            max_conn = info.data.get('max_connections')
+            if max_conn and v > max_conn:
+                raise ValueError(f'current_connections ({v}) cannot exceed max_connections ({max_conn})')
         return v
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "current_connections": 25,
                 "max_connections": 100,
@@ -205,6 +213,7 @@ class ConnectionInfoResponse(BaseModel):
                 "warnings": ["WARNING: Connection usage at 75% - monitor for potential saturation"]
             }
         }
+    )
 
 
 # ============================================================================
@@ -228,8 +237,8 @@ class ErrorResponse(BaseModel):
     details: Optional[ErrorDetails] = Field(None, description="Additional error details")
     recoverable: bool = Field(..., description="Whether the error is recoverable")
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "error": "ConnectionError",
                 "message": "Failed to connect to database",
@@ -239,6 +248,7 @@ class ErrorResponse(BaseModel):
                 "recoverable": True
             }
         }
+    )
 
 
 # ============================================================================

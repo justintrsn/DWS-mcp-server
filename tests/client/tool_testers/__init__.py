@@ -8,10 +8,12 @@ from .database import DatabaseToolTester
 from .schema import SchemaToolTester
 from .table import TableToolTester
 from .objects import ObjectToolTester
+from .query import QueryToolTester
 
 __all__ = [
     'DatabaseToolTester',
     'SchemaToolTester',
     'TableToolTester',
-    'ObjectToolTester'
+    'ObjectToolTester',
+    'QueryToolTester'
 ]

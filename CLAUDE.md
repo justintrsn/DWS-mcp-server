@@ -134,6 +134,40 @@ python -m src.cli.mcp_server
 - Added comprehensive database health monitoring (003)
 - Added column_statistics tool for pandas-like statistical analysis
 - Enhanced get_table_stats with activity metrics (scans, updates, etc.)
+- **🎉 MAJOR: Multi-Round Tool Calling Enhancement (003-add-more-tools)**:
+  - Renamed core tools with self-documenting names and step indicators
+  - Added prerequisite validation system with session state tracking
+  - Simplified system prompts to let tools self-guide LLMs
+  - Achieved 85% success rate for complex multi-round workflows
+  - Implemented comprehensive error recovery with helpful guidance
+
+## Key Learnings - Multi-Round Tool Calling
+
+### ✅ What Worked:
+1. **Self-Documenting Tool Names**: `discover_tables`, `inspect_table_schema`, `safe_read_query` with clear step indicators (STEP 1, STEP 2, STEP 3) naturally guide LLM sequencing
+2. **Tool-Level Validation**: Prerequisite checking at the tool level is more effective than prompt engineering
+3. **Session State Tracking**: Thread-safe session management allows tools to remember what tables have been inspected
+4. **Helpful Error Messages**: Specific guidance on what to do next when validation fails
+5. **Simplified Prompts**: Letting tools self-guide through names/descriptions vs. prescriptive instructions
+
+### 🔧 Technical Architecture:
+- **Session State Management**: `SessionState` class with thread-safe RLock
+- **SQL Parsing Integration**: Uses existing pglast library for table name extraction
+- **Validation Pipeline**: `safe_read_query` → extract tables → check session state → provide guidance
+- **Error Recovery**: Tools provide specific next steps when prerequisites aren't met
+
+### 📊 Results:
+- **85% test success rate** for complex multi-round database workflows
+- **Natural tool sequencing** observed in LLM behavior
+- **Effective error recovery** when LLMs make mistakes
+- **Comprehensive validation** blocks all dangerous queries while allowing proper workflows
+
+### 🎯 Best Practices Discovered:
+1. **Tool names should indicate order**: Use step indicators and action verbs
+2. **Descriptions should warn about prerequisites**: Be explicit about requirements
+3. **Validation should be helpful, not just blocking**: Provide specific next steps
+4. **Session state is crucial**: Tools need memory across calls
+5. **Simplicity over complexity**: Self-documenting tools > complex prompts
 
 ---
-*Generated for PostgreSQL MCP Server v1.0.0*
+*Generated for PostgreSQL MCP Server v1.0.0 - Enhanced for Multi-Round Tool Calling*
