@@ -43,14 +43,23 @@ mcp = FastMCP("PostgreSQL MCP Server")
 
 # Global database service instance
 db_service: Optional[DatabaseService] = None
+db_config: Optional[DatabaseConfig] = None
 
 
 def initialize_database():
-    """Initialize database connection."""
-    global db_service
+    """Initialize database connection using profile-based configuration."""
+    global db_service, db_config
     try:
-        config = DatabaseConfig()
-        db_service = DatabaseService(config.to_dict())
+        # Get database profile from environment or use default
+        profile_name = os.getenv('DATABASE_PROFILE')
+        db_config = DatabaseConfig(profile_name)
+
+        # Log which profile is being used
+        profile_info = db_config.get_profile_info()
+        logger.info(f"Using database profile: {profile_info.get('profile', 'unknown')}")
+        logger.info(f"Database: {profile_info.get('host')}:{profile_info.get('port')}/{profile_info.get('database')}")
+
+        db_service = DatabaseService(db_config.to_dict())
         db_service.connect()
         logger.info("Database connection established")
     except Exception as e:
@@ -809,6 +818,7 @@ def main():
             logger.info(f"Starting Health API on port {args.health_port}")
             health_api = HealthAPI(
                 db_service=db_service,
+                db_config=db_config,
                 host=args.host,
                 port=args.health_port
             )

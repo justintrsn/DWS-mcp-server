@@ -7,6 +7,7 @@ fastapi>=0.100.0
 uvicorn>=0.20.0
 openai>=1.0.0
 pglast>=6.0
+pyyaml>=6.0
 # asyncio is built-in with Python 3.11+
 
 # Testing dependencies

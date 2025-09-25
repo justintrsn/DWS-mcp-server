@@ -1,0 +1,111 @@
+# Docker Compose for PostgreSQL MCP Server with Anime Database
+version: '3.8'
+
+services:
+  # PostgreSQL Database with Anime Data
+  postgres-anime:
+    image: postgres:15
+    container_name: mcp-postgres-anime
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: test_footfall
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_pass
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
+    ports:
+      - "5434:5432"  # Map to 5434 to avoid conflicts with local PostgreSQL
+    volumes:
+      # Initialize database with anime data
+      - ./scripts/setup_anime_db.sql:/docker-entrypoint-initdb.d/01-anime.sql
+      # Persist data
+      - postgres-anime-data:/var/lib/postgresql/data
+      # Optional: custom PostgreSQL configuration
+      # - ./config/postgresql.conf:/etc/postgresql/postgresql.conf
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user -d test_footfall"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - mcp-network
+
+  # PostgreSQL MCP Server
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: huawei/dws-mcp-server:latest
+    container_name: mcp-server
+    restart: unless-stopped
+    depends_on:
+      postgres-anime:
+        condition: service_healthy
+    ports:
+      - "3000:3000"    # MCP SSE endpoint
+      - "8080:8080"    # Health API
+    environment:
+      # Database Configuration
+      DATABASE_PROFILE: anime
+      DATABASES_CONFIG: /app/config/databases.yaml
+      DOCKER_ENV: true
+
+      # Server Configuration
+      LOG_LEVEL: INFO
+      MCP_PORT: 3000
+
+      # Huawei MAAS Configuration (for LLM integration)
+      MAAS_API_KEY: oVoWyKNsGDF-_pIp3CoQTN4NVI43O0iTJdJQVvWqYl5aMZ_Pqe-nPEYK_QqtKEqlz1FDWmW1wHO861dauTjk3w
+      MAAS_BASE_URL: https://api.modelarts-maas.com/v1
+      MAAS_MODEL_NAME: deepseek-v3.1
+
+      # Optional: Override database connection for Docker environment
+      # DATABASE_URI: postgresql://test_user:test_pass@postgres-anime:5432/test_footfall
+    volumes:
+      # Mount configuration files
+      - ./config:/app/config:ro
+      # Optional: Mount logs directory
+      - ./logs:/app/logs
+      # Optional: Mount additional scripts
+      - ./scripts:/app/scripts:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - mcp-network
+
+# Named volumes for data persistence
+volumes:
+  postgres-anime-data:
+    driver: local
+    name: mcp-postgres-anime-data
+
+# Custom network for service communication
+networks:
+  mcp-network:
+    driver: bridge
+    name: mcp-network
+
+# Production deployment example (commented out)
+# For ECS deployment, you might want to add:
+#
+# services:
+#   # External database connection (for DWS)
+#   mcp-server-production:
+#     extends: mcp-server
+#     environment:
+#       DATABASE_PROFILE: dws_production
+#       # Remove local postgres dependency
+#     depends_on: []
+#     # Add resource limits for production
+#     deploy:
+#       resources:
+#         limits:
+#           cpus: '2.0'
+#           memory: 1G
+#         reservations:
+#           cpus: '1.0'
+#           memory: 512M

@@ -1,0 +1,103 @@
+# Database Configuration Profiles for PostgreSQL MCP Server
+# This file defines multiple database connections for different environments
+
+version: "1.0"
+default_profile: "anime"  # Default database profile to use
+
+databases:
+  # Test/Development Database - Anime Data
+  anime:
+    name: "Anime Test Database"
+    description: "Local PostgreSQL with anime data for testing and development"
+    uri: "postgresql://test_user:test_pass@postgres-anime:5432/test_footfall"
+    # Alternative URI for local development (outside Docker)
+    uri_local: "postgresql://test_user:test_pass@localhost:5434/test_footfall"
+    enabled: true
+    type: "postgresql"
+    environment: "development"
+    features:
+      - "read_only"
+      - "sample_data"
+      - "testing"
+    tags:
+      - "anime"
+      - "test"
+      - "development"
+
+  # Huawei DWS Production Database
+  dws_production:
+    name: "Huawei DWS Production"
+    description: "Production Data Warehouse Service - Footfall Analytics"
+    uri: "postgresql://dbadmin:Huawei!@4321@124.243.149.239:8000/footfall"
+    enabled: true  # Ready to use when needed
+    type: "postgresql"
+    environment: "production"
+    features:
+      - "read_only"
+      - "production_data"
+      - "analytics"
+    tags:
+      - "dws"
+      - "production"
+      - "huawei"
+      - "footfall"
+    connection_options:
+      connect_timeout: 30
+      query_timeout: 60
+      max_connections: 10
+
+  # Staging Environment (Future)
+  dws_staging:
+    name: "DWS Staging"
+    description: "Staging environment for testing before production"
+    uri: "postgresql://staging_user:staging_pass@staging-dws:8000/staging_footfall"
+    enabled: false  # Not configured yet
+    type: "postgresql"
+    environment: "staging"
+    features:
+      - "read_only"
+      - "staging_data"
+      - "pre_production_testing"
+    tags:
+      - "dws"
+      - "staging"
+      - "huawei"
+
+  # Local Development Database (Fallback)
+  local_dev:
+    name: "Local Development PostgreSQL"
+    description: "Local PostgreSQL instance for development"
+    uri: "postgresql://dev_user:dev_pass@localhost:5432/dev_footfall"
+    enabled: false  # Optional fallback
+    type: "postgresql"
+    environment: "development"
+    features:
+      - "read_write"
+      - "development"
+      - "local"
+    tags:
+      - "local"
+      - "development"
+
+# Profile validation settings
+validation:
+  require_enabled: true  # Only allow switching to enabled profiles
+  test_connection_timeout: 10  # Seconds to wait when testing connections
+  allowed_hosts:
+    - "localhost"
+    - "127.0.0.1"
+    - "postgres-anime"
+    - "124.243.149.239"  # Huawei DWS
+    - "staging-dws"
+
+# Security settings
+security:
+  allow_uri_override: false  # Don't allow URI override via environment
+  mask_credentials_in_logs: true  # Mask passwords in log files
+  require_ssl: false  # Set to true for production
+
+# Monitoring and health checks
+monitoring:
+  health_check_interval: 30  # Seconds between health checks
+  connection_pool_monitoring: true
+  query_performance_tracking: true
