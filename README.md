@@ -141,6 +141,308 @@ python -m src.cli.mcp_server --transport sse --port 3000
 python -m src.cli.mcp_server --transport sse --port 3000 --health-port 8080
 ```
 
+## Configure Your AI Assistant
+
+We provide full instructions for configuring DWS MCP Server with Claude Desktop and other MCP clients. Many MCP clients have similar configuration files, you can adapt these steps to work with the client of your choice.
+
+### Claude Desktop Configuration
+
+You will need to edit the Claude Desktop configuration file to add DWS MCP Server. The location of this file depends on your operating system:
+
+- **MacOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
+
+You can also use the Settings menu item in Claude Desktop to locate the configuration file.
+
+You will now edit the `mcpServers` section of the configuration file.
+
+#### If you are using Docker
+
+**⚠️ Important**: Claude Desktop's `env` section doesn't automatically pass environment variables to Docker containers. You need to explicitly include them in the `args` section.
+
+**Option 1: Direct DATABASE_URI (Recommended)**
+```json
+{
+  "mcpServers": {
+    "dws-postgres": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "--network=host",
+        "-e", "DATABASE_URI=postgresql://username:password@localhost:5432/dbname",
+        "swr.ap-southeast-3.myhuaweicloud.com/wooyankit/dws-mcp-server:latest",
+        "--transport=stdio"
+      ]
+    }
+  }
+}
+```
+
+**Option 2: Individual Database Parameters (More Secure)**
+```json
+{
+  "mcpServers": {
+    "dws-postgres": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "--network=host",
+        "-e", "DB_HOST=localhost",
+        "-e", "DB_PORT=5432",
+        "-e", "DB_DATABASE=mydb",
+        "-e", "DB_USER=myuser",
+        "-e", "DB_PASSWORD=mypass",
+        "swr.ap-southeast-3.myhuaweicloud.com/wooyankit/dws-mcp-server:latest",
+        "--transport=stdio"
+      ]
+    }
+  }
+}
+```
+
+**Option 3: Using Shell Environment Variables (if you have them set)**
+```json
+{
+  "mcpServers": {
+    "dws-postgres": {
+      "command": "sh",
+      "args": [
+        "-c",
+        "docker run -i --rm --network=host -e DATABASE_URI=\"$DATABASE_URI\" swr.ap-southeast-3.myhuaweicloud.com/wooyankit/dws-mcp-server:latest --transport=stdio"
+      ],
+      "env": {
+        "DATABASE_URI": "postgresql://username:password@localhost:5432/dbname"
+      }
+    }
+  }
+}
+```
+
+**Security Note**: Avoid storing credentials directly in configuration files. Consider using environment variables or Docker secrets for production deployments.
+
+#### If you are using Python directly
+
+```json
+{
+  "mcpServers": {
+    "dws-postgres": {
+      "command": "python",
+      "args": [
+        "-m",
+        "src.cli.mcp_server",
+        "--transport=stdio"
+      ],
+      "cwd": "/path/to/dws-mcp-server",
+      "env": {
+        "DB_HOST": "localhost",
+        "DB_PORT": "5432",
+        "DB_DATABASE": "your_database",
+        "DB_USER": "your_username",
+        "DB_PASSWORD": "your_password"
+      }
+    }
+  }
+}
+```
+
+#### If you are using a virtual environment
+
+```json
+{
+  "mcpServers": {
+    "dws-postgres": {
+      "command": "/path/to/dws-mcp-server/.venv/bin/python",
+      "args": [
+        "-m",
+        "src.cli.mcp_server",
+        "--transport=stdio"
+      ],
+      "cwd": "/path/to/dws-mcp-server",
+      "env": {
+        "DB_HOST": "localhost",
+        "DB_PORT": "5432",
+        "DB_DATABASE": "your_database",
+        "DB_USER": "your_username",
+        "DB_PASSWORD": "your_password"
+      }
+    }
+  }
+}
+```
+
+### Connection Configuration
+
+#### Database URI Format
+Replace the connection details with your actual database information:
+```
+postgresql://username:password@hostname:port/database_name
+```
+
+Examples:
+- Local PostgreSQL: `postgresql://user:pass@localhost:5432/mydb`
+- Docker PostgreSQL: `postgresql://test_user:test_pass@localhost:5434/test_footfall`
+- Remote DWS: `postgresql://dwsuser:password@dws-cluster.region.com:8000/analytics`
+
+#### Environment Variables Alternative
+Instead of DATABASE_URI, you can use individual environment variables:
+```json
+"env": {
+  "DB_HOST": "your-database-host",
+  "DB_PORT": "8000",
+  "DB_DATABASE": "your-database-name",
+  "DB_USER": "your-username",
+  "DB_PASSWORD": "your-password",
+  "LOG_LEVEL": "INFO"
+}
+```
+
+### Other MCP Clients
+
+Many MCP clients have similar configuration files to Claude Desktop, and you can adapt the examples above to work with the client of your choice.
+
+#### Cursor
+Navigate from the Command Palette to **Cursor Settings**, then open the **MCP tab** to access the configuration file.
+
+```json
+{
+  "mcpServers": {
+    "dws-postgres": {
+      "command": "python",
+      "args": ["-m", "src.cli.mcp_server", "--transport=stdio"],
+      "cwd": "/path/to/dws-mcp-server",
+      "env": {
+        "DATABASE_URI": "postgresql://username:password@localhost:5432/dbname"
+      }
+    }
+  }
+}
+```
+
+#### Windsurf
+Navigate from the Command Palette to **Open Windsurf Settings Page** to access the configuration file.
+
+```json
+{
+  "mcpServers": {
+    "dws-postgres": {
+      "command": "python",
+      "args": ["-m", "src.cli.mcp_server", "--transport=stdio"],
+      "cwd": "/path/to/dws-mcp-server",
+      "env": {
+        "DATABASE_URI": "postgresql://username:password@localhost:5432/dbname"
+      }
+    }
+  }
+}
+```
+
+#### Goose
+Run `goose configure`, then select **Add Extension**.
+
+### SSE Transport (Multi-Client Support)
+
+DWS MCP Server supports the SSE transport, which allows multiple MCP clients to share one server, possibly a remote server. To use the SSE transport, start the server with the `--transport=sse` option.
+
+#### Docker with SSE Transport:
+```bash
+docker run -p 3000:3000 -p 8080:8080 \
+  -e DATABASE_URI=postgresql://username:password@localhost:5432/dbname \
+  swr.ap-southeast-3.myhuaweicloud.com/wooyankit/dws-mcp-server:latest \
+  --transport=sse --port=3000 --health-port=8080
+```
+
+#### Client Configuration for SSE:
+
+**Cursor/Cline** (`mcp.json` or `cline_mcp_settings.json`):
+```json
+{
+  "mcpServers": {
+    "dws-postgres": {
+      "type": "sse",
+      "url": "http://localhost:3000/sse"
+    }
+  }
+}
+```
+
+**Windsurf** (`mcp_config.json`):
+```json
+{
+  "mcpServers": {
+    "dws-postgres": {
+      "type": "sse",
+      "serverUrl": "http://localhost:3000/sse"
+    }
+  }
+}
+```
+
+### PostgreSQL Extensions (Optional)
+
+For enhanced functionality, you may want to install these PostgreSQL extensions:
+
+#### pg_stat_statements
+Enables advanced query performance analysis:
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+```
+
+#### hypopg
+Enables hypothetical index recommendations:
+```sql
+CREATE EXTENSION IF NOT EXISTS hypopg;
+```
+
+**Note**: These extensions are automatically available on AWS RDS, Azure SQL, and Google Cloud SQL. For self-managed PostgreSQL, you may need to install them via your package manager and add `pg_stat_statements` to `shared_preload_libraries` in postgresql.conf.
+
+### Troubleshooting Configuration
+
+#### General Issues
+1. **Path Issues**: Ensure `cwd` points to the correct project directory
+2. **Python Environment**: Use the full path to Python in virtual environments
+3. **Database Connection**: Test connectivity using `psql` or similar tools first
+4. **Permissions**: Ensure database user has SELECT permissions on target schemas
+
+#### Docker-Specific Issues
+5. **Environment Variables Not Working**:
+   - ❌ Don't rely on the `env` section to pass variables to Docker
+   - ✅ Use `-e KEY=VALUE` format directly in the `args` section
+
+6. **Network Connectivity**:
+   - Use `--network=host` for simple localhost database connections
+   - For complex setups, create a custom Docker network
+   - On macOS/Windows, use `host.docker.internal` instead of `localhost` in connection strings
+
+7. **Container Image Issues**:
+   - Verify the image exists: `docker pull swr.ap-southeast-3.myhuaweicloud.com/wooyankit/dws-mcp-server:latest`
+   - Check container logs if startup fails: `docker logs <container_id>`
+
+8. **Stdio Transport Issues**:
+   - Ensure `--transport=stdio` is the last argument
+   - Don't mix stdio transport with port arguments
+   - Check Claude Desktop logs for connection errors
+
+#### Testing Your Configuration
+```bash
+# Test the Docker command manually first:
+docker run -i --rm --network=host \
+  -e DATABASE_URI=postgresql://user:pass@localhost:5432/db \
+  swr.ap-southeast-3.myhuaweicloud.com/wooyankit/dws-mcp-server:latest \
+  --transport=stdio
+
+# You should see MCP protocol initialization messages
+```
+
+#### Common Error Messages
+- **"Connection refused"**: Check database host/port and ensure database is running
+- **"Authentication failed"**: Verify username/password in connection string
+- **"Database does not exist"**: Ensure the database name is correct
+- **"Permission denied"**: Database user needs SELECT permissions on target schemas
+
 ### Available MCP Tools (15+ Tools)
 
 The server provides comprehensive PostgreSQL introspection through organized tool categories:
